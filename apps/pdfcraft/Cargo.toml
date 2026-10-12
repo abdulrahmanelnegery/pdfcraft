@@ -46,6 +46,7 @@ pollster = "1.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # Exercise the vendored Wayland scroll policy with the actual winit event type.
+# Exercise the vendored Wayland pinch policy with winit's actual event type.
 winit = { version = "0.30", default-features = false, features = ["wayland"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

@@ -35,6 +35,8 @@ use crate::platform_impl::wayland::{self, DeviceId, WindowId};
 
 pub mod relative_pointer;
 mod scroll;
+mod pinch_state;
+pub mod pointer_gesture;
 
 impl PointerHandler for WinitState {
     fn pointer_frame(
