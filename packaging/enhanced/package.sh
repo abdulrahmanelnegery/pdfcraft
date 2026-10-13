@@ -49,7 +49,10 @@ Architecture: $ARCH
 Maintainer: PdfCraft Enhanced <noreply@localhost>
 Depends: libc6 (>= 2.35), libgcc-s1, libxkbcommon0, libvulkan1 | libegl1
 Recommends: cups-client, mesa-vulkan-drivers, xdg-desktop-portal
-Description: PdfCraft with a page night mode and per-file reading position
+Description: PdfCraft Enhanced, a PDF reader and editor made for long reading
+ Open-source Rust PDF reader and editor (a fork of PdfCraft) with night, soft
+ night and sepia reading themes, a per-file reading place (page, position and
+ zoom), a distraction-free full-screen mode, icon menus, and Read mode by default.
  Installs next to the regular pdfcraft package.
 CTL
   dpkg-deb --build --root-owner-group "$STAGE" "$OUT"

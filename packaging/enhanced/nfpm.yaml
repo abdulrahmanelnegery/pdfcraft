@@ -9,8 +9,11 @@ section: graphics
 priority: optional
 maintainer: PdfCraft Enhanced <noreply@localhost>
 description: |-
-  PdfCraft with a page night mode and per-file reading position.
-  Installs next to the regular pdfcraft package (own app id, icon and settings).
+  PdfCraft Enhanced, a PDF reader and editor made for long reading.
+  Open-source Rust PDF reader and editor (a fork of PdfCraft) with night, soft
+  night and sepia reading themes, a per-file reading place (page, position and
+  zoom), a distraction-free full-screen mode, icon menus, and Read mode by default.
+  Installs next to the regular pdfcraft package.
 overrides:
   deb:
     depends:
