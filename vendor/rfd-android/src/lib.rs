@@ -1,9 +1,14 @@
 //! The slice of `rfd`'s async file-dialog API that PdfCraft calls, for Android, where `rfd` has no
-//! backend. The dialogs choose nothing yet (every pick resolves to `None`): picking a document on
-//! Android goes through the Storage Access Framework, which needs a Java activity result and is
-//! done outside this shim. Names and signatures follow `rfd` so the call sites stay unchanged.
+//! backend. A pick does not open a system dialog: it queues a [`android::PickRequest`] that the
+//! Android shell (`apps/pdfcraft-android`) shows as its own in-app file browser and completes. The
+//! calls keep `rfd`'s names and signatures so the call sites stay unchanged.
 
+use std::collections::VecDeque;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::{Context, Poll, Waker};
 
 /// A chosen file or folder.
 #[derive(Clone, Debug)]
@@ -31,7 +36,7 @@ impl From<PathBuf> for FileHandle {
     }
 }
 
-/// Builder for a file dialog; the options are kept for when a picker backs it.
+/// Builder for a file dialog.
 #[derive(Clone, Debug, Default)]
 pub struct AsyncFileDialog {
     title: Option<String>,
@@ -66,18 +71,118 @@ impl AsyncFileDialog {
     }
 
     pub fn pick_file(self) -> impl Future<Output = Option<FileHandle>> {
-        std::future::ready(None)
+        let pick = self.queue(android::Kind::File);
+        async move { pick.await.and_then(|v| v.into_iter().next()) }
     }
 
     pub fn pick_files(self) -> impl Future<Output = Option<Vec<FileHandle>>> {
-        std::future::ready(None)
+        self.queue(android::Kind::Files)
     }
 
     pub fn pick_folder(self) -> impl Future<Output = Option<FileHandle>> {
-        std::future::ready(None)
+        let pick = self.queue(android::Kind::Folder);
+        async move { pick.await.and_then(|v| v.into_iter().next()) }
     }
 
     pub fn save_file(self) -> impl Future<Output = Option<FileHandle>> {
-        std::future::ready(None)
+        let pick = self.queue(android::Kind::Save);
+        async move { pick.await.and_then(|v| v.into_iter().next()) }
     }
+
+    fn queue(self, kind: android::Kind) -> Pick {
+        let shared = Arc::new(Mutex::new(Shared { result: None, waker: None }));
+        lock(&android::QUEUE).push_back(android::PickRequest {
+            kind,
+            title: self.title,
+            file_name: self.file_name,
+            directory: self.directory,
+            filters: self.filters,
+            shared: shared.clone(),
+        });
+        Pick { shared }
+    }
+}
+
+/// What the Android shell sees of the dialogs (not part of `rfd`).
+pub mod android {
+    use super::*;
+
+    pub(super) static QUEUE: Mutex<VecDeque<PickRequest>> = Mutex::new(VecDeque::new());
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Kind {
+        File,
+        Files,
+        Folder,
+        Save,
+    }
+
+    /// A pick waiting for the user. Complete it with [`PickRequest::finish`] (or drop it to cancel).
+    pub struct PickRequest {
+        pub kind: Kind,
+        pub title: Option<String>,
+        /// The suggested name when saving.
+        pub file_name: Option<String>,
+        pub directory: Option<PathBuf>,
+        /// `(name, extensions)`; no filters means any file.
+        pub filters: Vec<(String, Vec<String>)>,
+        pub(super) shared: Arc<Mutex<Shared>>,
+    }
+
+    impl PickRequest {
+        /// Answer the pick: `None` cancels it.
+        pub fn finish(self, paths: Option<Vec<PathBuf>>) {
+            self.complete(paths);
+        }
+
+        fn complete(&self, paths: Option<Vec<PathBuf>>) {
+            let mut shared = lock(&self.shared);
+            if shared.result.is_none() {
+                shared.result = Some(paths.map(|p| p.into_iter().map(FileHandle::from).collect()));
+            }
+            if let Some(waker) = shared.waker.take() {
+                waker.wake();
+            }
+        }
+    }
+
+    impl Drop for PickRequest {
+        fn drop(&mut self) {
+            self.complete(None);
+        }
+    }
+
+    /// The oldest waiting pick, if any.
+    pub fn take_request() -> Option<PickRequest> {
+        lock(&QUEUE).pop_front()
+    }
+}
+
+pub(crate) struct Shared {
+    result: Option<Option<Vec<FileHandle>>>,
+    waker: Option<Waker>,
+}
+
+struct Pick {
+    shared: Arc<Mutex<Shared>>,
+}
+
+impl Future for Pick {
+    type Output = Option<Vec<FileHandle>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut shared = lock(&self.shared);
+        match shared.result.take() {
+            Some(result) => Poll::Ready(result),
+            None => {
+                shared.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+}
+
+/// A poisoned lock still holds a usable queue.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }

@@ -60,8 +60,10 @@ const SETTINGS_NAME: &str = "PdfCraftEnhanced";
 
 /// The app icon (assets/app-icon/README.md). macOS gets the version on Apple's icon grid, with a
 /// transparent margin; Windows and Linux get the full-bleed tile.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "enhanced")))]
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/pdfcraft-1024.png");
+#[cfg(all(target_os = "macos", feature = "enhanced"))]
+const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon-enhanced/hicolor/512x512/apps/dev.pdfcraftenhanced.png");
 #[cfg(all(not(target_os = "macos"), not(feature = "enhanced")))]
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.pdfcraft.png");
 
