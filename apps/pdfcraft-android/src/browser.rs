@@ -93,7 +93,7 @@ impl Browser {
                     ui.label(egui::RichText::new(self.dir.display().to_string()).small());
                 });
                 let footer = 64.0;
-                egui::ScrollArea::vertical().max_height(ui.available_height() - footer).auto_shrink([false, false]).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height((ui.available_height() - footer).max(0.0)).auto_shrink([false, false]).show(ui, |ui| {
                     for entry in &self.entries {
                         if !entry.folder && matches!(kind, Kind::Folder) {
                             continue;

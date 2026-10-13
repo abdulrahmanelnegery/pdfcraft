@@ -15,8 +15,9 @@ pub struct Incoming {
     pub bytes: Vec<u8>,
 }
 
-/// Larger than any PDF worth opening on a phone; a stream past it is dropped, not read.
-const MAX_BYTES: usize = 1 << 30;
+/// Larger than any PDF worth opening from an intent on a phone; a stream past it is dropped, not read
+/// (the picker route copies to a file instead and has no such limit).
+const MAX_BYTES: usize = 256 << 20;
 
 fn with_activity<R>(app: &AndroidApp, f: impl FnOnce(&mut JNIEnv, &JObject) -> JniResult<R>) -> Option<R> {
     // SAFETY: android-activity keeps the VM and the activity object valid for as long as the app runs.
