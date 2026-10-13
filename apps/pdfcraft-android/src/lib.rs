@@ -96,6 +96,7 @@ fn android_main(app: AndroidApp) {
             let mut app = PdfCraftApp::new();
             // A finger drag pans the page; text selection is the Select tool's job, one tap away.
             app.quick_tool = pdfcraft_ui_egui::QuickTool::Hand;
+            app.compact_forced = true;
             if let Some(json) = cc.storage.and_then(|s| s.get_string("pdfcraft")) {
                 app.restore(&json);
             }

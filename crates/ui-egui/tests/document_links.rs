@@ -132,6 +132,18 @@ fn click_link_at(h: &mut Harness<'static, PdfCraftApp>, y: f32) {
 
 fn click_remote_link(h: &mut Harness<'static, PdfCraftApp>) {
     click_link(h);
+    settle_opens(h);
+}
+
+/// Opening is asynchronous (a worker prepares the file): run frames until it has finished, up to a
+/// generous deadline, so a slow machine does not make the next assertion race it.
+fn settle_opens(h: &mut Harness<'static, PdfCraftApp>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while h.state().opens_in_flight() > 0 && std::time::Instant::now() < deadline {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(2);
 }
 
 fn click_link(h: &mut Harness<'static, PdfCraftApp>) {
@@ -194,8 +206,10 @@ fn a_remote_destination_survives_password_retries_and_cancel_opens_no_tab() {
     assert!(h.state().password_prompt.is_some());
     assert_eq!(h.state().views.len(), 1);
     h.state_mut().submit_password(Some("wrong-password".into()));
+    settle_opens(&mut h);
     assert!(h.state().password_prompt.as_ref().is_some_and(|p| p.error.is_some()));
     h.state_mut().submit_password(Some("test-password".into()));
+    settle_opens(&mut h);
     assert_eq!(h.state().views.len(), 2);
     assert_eq!(h.state().views[1].current, 1, "the destination survives a wrong-password retry");
 
@@ -419,6 +433,7 @@ fn an_absolute_gotor_waits_for_consent_and_keeps_its_destination_across_tabs() {
     h.run_steps(3);
     h.get_by_label("Allow").click();
     h.run_steps(3);
+    settle_opens(&mut h);
     assert!(h.state().pending_remote_link.is_none());
     assert_eq!(h.state().views.len(), 3);
     assert_eq!(h.state().views[2].current, 1);
@@ -486,6 +501,7 @@ fn consenting_to_absolute_gotor_still_validates_the_target() {
         assert!(h.state().toast.is_none(), "{name} isn't checked before consent");
         h.get_by_label("Allow").click();
         h.run_steps(3);
+        settle_opens(&mut h);
         assert!(h.state().pending_remote_link.is_none());
         assert_eq!(h.state().views.len(), 1, "{name}");
         assert!(h.state().toast.is_some(), "{name} is refused after consent");
@@ -507,15 +523,19 @@ fn an_approved_absolute_gotor_preserves_password_retries_and_cancellation() {
         assert!(h.state().password_prompt.is_none());
         h.get_by_label("Allow").click();
         h.run_steps(3);
+        settle_opens(&mut h);
         assert!(h.state().password_prompt.is_some());
         h.state_mut().submit_password(Some("wrong-password".into()));
+        settle_opens(&mut h);
         assert!(h.state().password_prompt.as_ref().unwrap().error.is_some());
         assert_eq!(h.state().views.len(), 1);
         if cancel {
             h.state_mut().submit_password(None);
+            settle_opens(&mut h);
             assert_eq!(h.state().views.len(), 1);
         } else {
             h.state_mut().submit_password(Some("test-password".into()));
+            settle_opens(&mut h);
             assert_eq!(h.state().views.len(), 2);
             assert_eq!(h.state().views[1].current, 1);
         }

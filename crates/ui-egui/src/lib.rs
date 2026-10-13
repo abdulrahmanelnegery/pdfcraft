@@ -476,7 +476,7 @@ pub struct RecentFile {
 const DEFAULT_MODE_KEY: &str = if cfg!(feature = "enhanced") { "default_mode_enhanced" } else { "default_mode" };
 
 /// Windows narrower than this many points get the compact chrome.
-const COMPACT_WIDTH: f32 = 640.0;
+const COMPACT_WIDTH: f32 = 560.0;
 
 pub struct PdfCraftApp {
     pub docking: docking::Workspace,
@@ -528,6 +528,8 @@ pub struct PdfCraftApp {
     pub page_theme: canvas::PageTheme,
     /// A phone-sized window: the chrome drops the tab strip and desktop-only controls.
     pub compact: bool,
+    /// Keep the compact chrome whatever the width (a phone turned sideways is still a phone).
+    pub compact_forced: bool,
     /// Full screen: the page controls (navigation rail and quick tools) are tucked away.
     pub fs_controls_hidden: bool,
     /// The active view's page display last frame, to spot the reader changing it.
@@ -909,6 +911,7 @@ impl PdfCraftApp {
             reading_colors: Default::default(),
             page_theme: Default::default(),
             compact: false,
+            compact_forced: false,
             fs_controls_hidden: false,
             display_seen: None,
             reading_places: Vec::new(),
@@ -2377,6 +2380,15 @@ impl PdfCraftApp {
         }
     }
 
+    /// How many files the background worker is still preparing. Opening is asynchronous, so a caller
+    /// that needs the tab (a test, a headless capture) waits for this to reach zero.
+    pub fn opens_in_flight(&self) -> usize {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.pending_opens.len();
+        #[cfg(target_arch = "wasm32")]
+        0
+    }
+
     /// `true` while any open document still waits for page renders (used by headless capture).
     pub fn render_pending(&self) -> bool {
         self.views.iter().any(|v| v.render_pending())
@@ -2827,7 +2839,7 @@ impl eframe::App for PdfCraftApp {
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.compact = ctx.content_rect().width() < COMPACT_WIDTH;
+        self.compact = self.compact_forced || ctx.content_rect().width() < COMPACT_WIDTH;
         self.remember_display_choice();
         self.ctx = Some(ctx.clone());
         self.dialog_epoch();
@@ -2897,6 +2909,7 @@ impl eframe::App for PdfCraftApp {
         // Don't replace a pending prompt or import. A startup file may need its own password
         // prompt, so its bytes stay queued until the current interaction finishes.
         if self.password_prompt.is_none()
+            && self.opens_in_flight() == 0
             && self.image_import.is_none()
             && self.dialog.is_none()
             && self.close_request.is_none()
@@ -2905,7 +2918,8 @@ impl eframe::App for PdfCraftApp {
         {
             let startup = self.startup_inbox.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
             for (name, bytes) in startup {
-                let activate = !self.startup_superseded;
+                // A file that arrives while another document is open (or opening) stays in the background.
+                let activate = !self.startup_superseded && self.active.is_none() && self.opens_in_flight() == 0;
                 if let Err(e) = self.open_bytes_with_focus(&name, None, bytes, activate) {
                     self.notify_fmt("Couldn't open {name}: {e}", &[("name", &name), ("e", &e)]);
                 }
