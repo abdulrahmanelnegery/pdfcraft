@@ -17,6 +17,8 @@ struct Shell {
     app: PdfCraftApp,
     activity: AndroidApp,
     browser: browser::Browser,
+    /// A pick the system document picker is answering.
+    native_pick: Option<rfd::android::PickRequest>,
     checked_intent: bool,
 }
 
@@ -30,6 +32,32 @@ impl Shell {
             && let Err(e) = self.app.open_bytes(&name, None, bytes)
         {
             log::warn!("could not open {name}: {e}");
+        }
+    }
+}
+
+impl Shell {
+    /// Opening goes to the system document picker; saving and choosing folders use the in-app browser.
+    fn route_picks(&mut self) {
+        if let Some(request) = self.native_pick.take() {
+            match platform::take_picked() {
+                Some(paths) => request.finish(Some(paths).filter(|p| !p.is_empty())),
+                None => self.native_pick = Some(request),
+            }
+        }
+        if self.native_pick.is_some() || self.browser.busy() {
+            return;
+        }
+        let Some(request) = rfd::android::take_request() else { return };
+        let multiple = match request.kind {
+            rfd::android::Kind::File => false,
+            rfd::android::Kind::Files => true,
+            _ => return self.browser.begin(request, &self.activity),
+        };
+        if platform::request_documents(&self.activity, multiple) {
+            self.native_pick = Some(request);
+        } else {
+            self.browser.begin(request, &self.activity);
         }
     }
 }
@@ -50,6 +78,7 @@ impl App for Shell {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
+        self.route_picks();
         self.browser.show(ui.ctx(), &self.activity);
     }
 }
@@ -63,11 +92,14 @@ fn android_main(app: AndroidApp) {
         "PdfCraft Enhanced",
         options,
         Box::new(move |cc| {
+            platform::set_wake(cc.egui_ctx.clone());
             let mut app = PdfCraftApp::new();
+            // A finger drag pans the page; text selection is the Select tool's job, one tap away.
+            app.quick_tool = pdfcraft_ui_egui::QuickTool::Hand;
             if let Some(json) = cc.storage.and_then(|s| s.get_string("pdfcraft")) {
                 app.restore(&json);
             }
-            Ok(Box::new(Shell { app, activity, browser: browser::Browser::new(), checked_intent: false }))
+            Ok(Box::new(Shell { app, activity, browser: browser::Browser::new(), native_pick: None, checked_intent: false }))
         }),
     );
     if let Err(e) = result {

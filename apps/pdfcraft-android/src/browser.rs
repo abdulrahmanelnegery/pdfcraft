@@ -31,17 +31,23 @@ impl Browser {
         Self { request: None, dir: PathBuf::new(), entries: Vec::new(), chosen: Vec::new(), file_name: String::new(), access: false }
     }
 
-    /// Draw the browser over the app while a dialog waits, and start the next waiting one.
+    /// Whether a dialog is showing.
+    pub fn busy(&self) -> bool {
+        self.request.is_some()
+    }
+
+    /// Start answering `request` with the browser.
+    pub fn begin(&mut self, request: PickRequest, app: &AndroidApp) {
+        self.access = platform::has_storage_access(app);
+        self.dir = request.directory.clone().filter(|d| d.is_dir()).unwrap_or_else(|| default_root());
+        self.file_name = request.file_name.clone().unwrap_or_default();
+        self.chosen.clear();
+        self.request = Some(request);
+        self.refresh();
+    }
+
+    /// Draw the browser over the app while a dialog waits.
     pub fn show(&mut self, ctx: &egui::Context, app: &AndroidApp) {
-        if self.request.is_none() {
-            let Some(request) = rfd::android::take_request() else { return };
-            self.access = platform::has_storage_access(app);
-            self.dir = request.directory.clone().filter(|d| d.is_dir()).unwrap_or_else(|| default_root());
-            self.file_name = request.file_name.clone().unwrap_or_default();
-            self.chosen.clear();
-            self.request = Some(request);
-            self.refresh();
-        }
         let mut done: Option<Option<Vec<PathBuf>>> = None;
         let mut go: Option<PathBuf> = None;
         let mut open_settings = false;

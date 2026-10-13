@@ -1,9 +1,12 @@
 //! Calls into the Android activity through JNI: the PDF an `ACTION_VIEW` intent carries, and the
 //! storage permission the in-app file browser needs.
 
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
 use android_activity::AndroidApp;
 use jni::errors::Result as JniResult;
-use jni::objects::{JObject, JString, JValue};
+use jni::objects::{JClass, JObject, JObjectArray, JString, JValue};
 use jni::{JNIEnv, JavaVM};
 
 /// A document handed over by another app (a file manager, a download, a mail attachment).
@@ -150,4 +153,51 @@ pub fn request_storage_access(app: &AndroidApp) {
         }
         Ok(())
     });
+}
+
+/// The documents the system picker answered with, until the shell takes them.
+static PICKED: Mutex<Option<Vec<PathBuf>>> = Mutex::new(None);
+/// To wake the UI when the picker answers.
+static WAKE: OnceLock<egui::Context> = OnceLock::new();
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Remember the context the picker's answer should wake.
+pub fn set_wake(ctx: egui::Context) {
+    let _ = WAKE.set(ctx);
+}
+
+/// Show the system document picker (MainActivity.openDocuments). The answer arrives later through
+/// [`take_picked`].
+pub fn request_documents(app: &AndroidApp, multiple: bool) -> bool {
+    *lock(&PICKED) = None;
+    with_activity(app, |env, activity| {
+        env.call_method(activity, "openDocuments", "(Z)V", &[JValue::Bool(u8::from(multiple))])?;
+        Ok(())
+    })
+    .is_some()
+}
+
+/// The picker's answer once it has come: the picked files (empty when the user backed out).
+pub fn take_picked() -> Option<Vec<PathBuf>> {
+    lock(&PICKED).take()
+}
+
+/// Called by `MainActivity.onActivityResult` (after it copied the documents into the cache folder).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pdfcraftenhanced_MainActivity_nativePicked(mut env: JNIEnv, _class: JClass, paths: JObjectArray) {
+    let count = env.get_array_length(&paths).unwrap_or(0);
+    let mut picked = Vec::new();
+    for i in 0..count {
+        let Ok(element) = env.get_object_array_element(&paths, i) else { continue };
+        if let Ok(path) = env.get_string(&JString::from(element)) {
+            picked.push(PathBuf::from(String::from(path)));
+        }
+    }
+    *lock(&PICKED) = Some(picked);
+    if let Some(ctx) = WAKE.get() {
+        ctx.request_repaint();
+    }
 }

@@ -46,6 +46,7 @@ min_sdk_version = 26
 target_sdk_version = 34
 
 [package.metadata.android.application]
+has_code = true
 label = "PdfCraft Enhanced"
 icon = "@mipmap/ic_launcher"
 # Not the full-screen theme cargo-apk defaults to: the status bar keeps its own strip instead of
@@ -53,6 +54,8 @@ icon = "@mipmap/ic_launcher"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar"
 
 [package.metadata.android.application.activity]
+# Our NativeActivity subclass (java/), whose dex build-apk.sh adds to the APK.
+name = "dev.pdfcraftenhanced.MainActivity"
 config_changes = "orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode"
 exported = true
 

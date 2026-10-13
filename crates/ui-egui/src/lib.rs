@@ -475,6 +475,9 @@ pub struct RecentFile {
 /// choice from before it opened in Read mode doesn't pin it to All tools.
 const DEFAULT_MODE_KEY: &str = if cfg!(feature = "enhanced") { "default_mode_enhanced" } else { "default_mode" };
 
+/// Windows narrower than this many points get the compact chrome.
+const COMPACT_WIDTH: f32 = 640.0;
+
 pub struct PdfCraftApp {
     pub docking: docking::Workspace,
     pub(crate) pending_panel_reveals: Vec<docking::Panel>,
@@ -523,6 +526,8 @@ pub struct PdfCraftApp {
     pub reading_colors: pdfcraft_render::ReadingColors,
     /// How page rasters are tinted for reading (View ▸ Reading theme).
     pub page_theme: canvas::PageTheme,
+    /// A phone-sized window: the chrome drops the tab strip and desktop-only controls.
+    pub compact: bool,
     /// Full screen: the page controls (navigation rail and quick tools) are tucked away.
     pub fs_controls_hidden: bool,
     /// The active view's page display last frame, to spot the reader changing it.
@@ -903,6 +908,7 @@ impl PdfCraftApp {
             theme_preference: ThemePreference::Light,
             reading_colors: Default::default(),
             page_theme: Default::default(),
+            compact: false,
             fs_controls_hidden: false,
             display_seen: None,
             reading_places: Vec::new(),
@@ -2821,6 +2827,7 @@ impl eframe::App for PdfCraftApp {
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.compact = ctx.content_rect().width() < COMPACT_WIDTH;
         self.remember_display_choice();
         self.ctx = Some(ctx.clone());
         self.dialog_epoch();
