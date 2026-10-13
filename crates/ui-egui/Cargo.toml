@@ -44,9 +44,9 @@ arboard = { version = "3.6", default-features = false, features = ["image-data"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 # rfd has no Android backend: a stand-in with the same calls, which choose nothing yet.
-rfd-android = { path = "../../vendor/rfd-android" }
+rfd-android = { version = "0.1", path = "../../vendor/rfd-android" }
 # arboard has no Android backend either.
-arboard-android = { path = "../../vendor/arboard-android" }
+arboard-android = { version = "0.1", path = "../../vendor/arboard-android" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Control-channel tokens.
