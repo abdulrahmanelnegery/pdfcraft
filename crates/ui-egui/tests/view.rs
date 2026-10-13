@@ -1100,3 +1100,28 @@ fn sidebar_collapse_and_resize_preserves_scroll_position() {
     let rel_y_reopened = rect_reopened.min.y - vp_reopened.min.y;
     assert!((rel_y_reopened - rel_y_before).abs() < 1.0, "page 2 scroll position preserved on reopen: before {rel_y_before}, after {rel_y_reopened}");
 }
+
+/// Ctrl/⌘ with the wheel zooms in and out from the default fit-width view.
+#[test]
+fn ctrl_wheel_zooms_both_ways_from_the_default_view() {
+    let mut h = harness_stepping(1.0 / 60.0, &[]);
+    let at = h.state().views[0].viewport_rect().center();
+    h.hover_at(at);
+    h.run_steps(2);
+    let zoom_after = |h: &mut Harness<'static, PdfCraftApp>, dy: f32| {
+        let event = egui::Event::MouseWheel {
+            unit: MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, dy),
+            phase: TouchPhase::Move,
+            modifiers: Modifiers::COMMAND,
+        };
+        h.event(event);
+        h.run_steps(6);
+        h.state().views[0].zoom
+    };
+    let start = h.state().views[0].zoom;
+    let up = zoom_after(&mut h, 1.0);
+    assert!(up > start, "ctrl+wheel up zooms in: {start} -> {up}");
+    let down = zoom_after(&mut h, -1.0);
+    assert!(down < up, "ctrl+wheel down zooms out: {up} -> {down}");
+}

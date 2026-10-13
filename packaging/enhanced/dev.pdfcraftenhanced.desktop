@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=PdfCraft Enhanced
+GenericName=PDF Editor
+Comment=Read PDFs with night themes, reading place and full-screen reading
+Exec=pdfcraftenhanced %U
+TryExec=pdfcraftenhanced
+Icon=dev.pdfcraftenhanced
+Terminal=false
+StartupNotify=true
+StartupWMClass=dev.pdfcraftenhanced
+Categories=Office;Viewer;
+Keywords=pdf;viewer;editor;annotate;sign;forms;merge;split;
+MimeType=application/pdf;

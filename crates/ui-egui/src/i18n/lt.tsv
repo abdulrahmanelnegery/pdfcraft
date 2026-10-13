@@ -2584,3 +2584,12 @@ key	End	End
 key	Space	Tarpas
 	Move tag earlier	Perkelti žymą anksčiau
 	Move tag later	Perkelti žymą vėliau
+	Reading theme	Skaitymo tema
+	Normal page	Įprastas puslapis
+	Night	Naktis
+	Soft night	Švelni naktis
+	Sepia	Sepija
+	Reading theme (click to switch)	Skaitymo tema
+	Full screen mode ({key}); Esc leaves it	Viso ekrano veiksena ({key}); Esc
+	Hide controls	Slėpti valdiklius
+	Show controls	Rodyti valdiklius
