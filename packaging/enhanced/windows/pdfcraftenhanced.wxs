@@ -12,7 +12,7 @@
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/abdulrahmanelnegery/pdfcraft" />
 
-    <StandardDirectory Id="ProgramFiles64Folder">
+    <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="PdfCraft Enhanced">
         <Directory Id="ModelsFolder" Name="models" />
       </Directory>
