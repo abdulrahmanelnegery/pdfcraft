@@ -963,6 +963,26 @@ fn erasing_part_of_a_drawing() {
 }
 
 #[test]
+fn the_eraser_removes_a_highlight_it_rubs_over() {
+    let mut h = harness(|_| {});
+    h.state_mut().views[0].select_text(0, 4, 8);
+    assert!(h.state_mut().execute("comment.highlight"));
+    h.run_steps(3);
+    let marks = comments(&h);
+    assert_eq!(marks.iter().map(|a| a.subtype.as_str()).collect::<Vec<_>>(), ["Highlight"]);
+    let r = marks[0].rect;
+    let (cx, cy) = ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0);
+    h.state_mut().set_option("quick", "eraser").unwrap();
+    // Away from it nothing happens; over it the highlight goes, in one undo step.
+    drag_pt(&mut h, (cx + 200.0, cy + 200.0), (cx + 220.0, cy + 200.0));
+    assert_eq!(comments(&h).len(), 1, "a stroke elsewhere keeps it");
+    drag_pt(&mut h, (cx - 5.0, cy), (cx + 5.0, cy));
+    assert!(comments(&h).is_empty(), "{:?}", comments(&h));
+    let s = h.state();
+    assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Erase"));
+}
+
+#[test]
 fn hovering_a_comment_shows_its_author_and_text() {
     // A square comment by Ada over the first page's text.
     let pdf = String::from_utf8_lossy(TEXT_FIXTURE).replace("/Contents 5 0 R /Resources", "/Contents 5 0 R /Annots [8 0 R] /Resources").replace(
