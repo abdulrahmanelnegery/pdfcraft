@@ -1,0 +1,34 @@
+[package]
+name = "pdfcraft-android"
+description = "PdfCraft on Android (NativeActivity shell, experimental)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# No `[lints] workspace = true`: the workspace forbids `unsafe_code`, and the one attribute Android needs
+# (`#[unsafe(no_mangle)]` on `android_main`) is the only unsafe thing in this crate.
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+pdfcraft-ui-egui = { workspace = true }
+eframe = { workspace = true, features = ["android-native-activity", "wgpu", "default_fonts", "persistence"] }
+egui = { workspace = true }
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.15"
+log = { workspace = true }
+
+[package.metadata.android]
+package = "dev.pdfcraftenhanced"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "PdfCraft Enhanced"
+
+[package.metadata.android.application.activity]
+config_changes = "orientation|keyboardHidden|screenSize"

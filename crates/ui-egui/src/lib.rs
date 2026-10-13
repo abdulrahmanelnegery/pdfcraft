@@ -7,6 +7,12 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+// Android has no `rfd` backend: the same-named stand-in answers the `rfd::` paths used across the crate.
+#[cfg(target_os = "android")]
+extern crate arboard_android as arboard;
+#[cfg(target_os = "android")]
+extern crate rfd_android as rfd;
+
 /// Translate an English UI string into the current language (see [`i18n`]).
 macro_rules! tl {
     ($s:expr) => {
