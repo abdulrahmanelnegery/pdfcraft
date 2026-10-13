@@ -162,5 +162,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd out
-          sha256sum ./* > SHA256SUMS-windows-macos.txt
+          # One checksum file per package, named after it: <package>.sha256
+          for f in ./*; do
+            name="${f#./}"
+            sha256sum -- "$name" > "$name.sha256"
+          done
           gh release upload "$TAG" ./* --clobber --repo "$GITHUB_REPOSITORY"
