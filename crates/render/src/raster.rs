@@ -3472,6 +3472,78 @@ trailer << /Root 1 0 R >>
         page(&format!("q 20 0 0 20 5 5 cm /Im1 Do Q {red}"), fax);
     }
 
+    #[test]
+    fn tiff_predictor_packed_rgb_rows_keep_their_byte_boundaries() {
+        use hayro_syntax::object::{FromBytes, Object};
+        use std::io::Write;
+
+        // Red then green, with only the real sample bits compared: row padding may change.
+        // The three-column case also checks horizontal differencing: red/green/blue and
+        // green/red/blue, whose one-bit component differences wrap modulo two.
+        struct RowCase {
+            bpc: u8,
+            columns: u32,
+            encoded: &'static [u8],
+            expected: &'static [u8],
+            masks: &'static [u8],
+        }
+        let cases = [
+            RowCase { bpc: 1, columns: 1, encoded: &[0x80, 0x40], expected: &[0x80, 0x40], masks: &[0xe0] },
+            RowCase { bpc: 2, columns: 1, encoded: &[0xc0, 0x30], expected: &[0xc0, 0x30], masks: &[0xfc] },
+            RowCase { bpc: 4, columns: 1, encoded: &[0xf0, 0, 0x0f, 0], expected: &[0xf0, 0, 0x0f, 0], masks: &[0xff, 0xf0] },
+            RowCase { bpc: 1, columns: 3, encoded: &[0x99, 0x80, 0x5a, 0x80], expected: &[0x88, 0x80, 0x50, 0x80], masks: &[0xff, 0x80] },
+            RowCase { bpc: 8, columns: 1, encoded: &[255, 0, 0, 0, 255, 0], expected: &[255, 0, 0, 0, 255, 0], masks: &[0xff, 0xff, 0xff] },
+        ];
+        for RowCase { bpc, columns, encoded, expected, masks } in cases {
+            let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(encoded).unwrap();
+            let compressed = encoder.finish().unwrap();
+            let mut bytes = format!(
+                "<< /Filter /FlateDecode /DecodeParms << /Predictor 2 /Colors 3 /BitsPerComponent {bpc} /Columns {columns} >> /Length {} >> stream\n",
+                compressed.len()
+            )
+            .into_bytes();
+            bytes.extend_from_slice(&compressed);
+            bytes.extend_from_slice(b"\nendstream");
+            let Object::Stream(stream) = Object::from_bytes(&bytes).unwrap() else { panic!("stream expected") };
+            let decoded = stream.decoded().unwrap();
+            assert_eq!(decoded.len(), expected.len());
+            for ((actual, expected), mask) in decoded.iter().zip(expected).zip(masks.iter().cycle()) {
+                assert_eq!(actual & mask, *expected, "{bpc}-bit RGB, {columns} columns");
+            }
+        }
+    }
+
+    #[test]
+    fn tiff_predictor_packed_rgb_image_renders_every_row() {
+        use std::io::Write;
+
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&[0x80, 0x40]).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let content = "q 40 0 0 40 0 0 cm /Im1 Do Q";
+        let mut pdf = format!(
+            "%PDF-1.7\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >> endobj\n\
+4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n\
+5 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 1 /Filter /FlateDecode /DecodeParms << /Predictor 2 /Colors 3 /BitsPerComponent 1 /Columns 1 >> /Length {} >> stream\n",
+            content.len(),
+            compressed.len()
+        )
+        .into_bytes();
+        pdf.extend_from_slice(&compressed);
+        pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+        let mut renderer = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+        let page = renderer.render(RenderRequest { page: 0, kind: RequestKind::Pixels, scale: 1.0, ..Default::default() });
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert_eq!((page.width, page.height), (40, 40));
+        let pixel = |y: usize| &page.rgba[((y * 40 + 20) * 4)..][..4];
+        assert_eq!(pixel(10), &[255, 0, 0, 255]);
+        assert_eq!(pixel(30), &[0, 255, 0, 255]);
+    }
+
     /// From the nightly `cargo xtask fuzz`: a FlateDecode predictor with `/Columns
     /// 9223372036854775807` wrapped to a 2^61-byte row allocation (an abort on any machine), and
     /// a line width of 9223372036854775807 made stroke expansion allocate 10 GB. Vendored hayro
@@ -5195,6 +5267,56 @@ trailer << /Root 1 0 R >>
         assert_eq!(pixel(&on, 150, 55), &[255, 255, 255, 255], "the image's white quadrant stays white");
     }
 
+    /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
+    /// highlight keeps its `/C`, so on a dark background the content under it shows through the
+    /// Multiply blend in the highlight's colour instead of being darkened into invisibility.
+    /// Both annotation paths are covered: the `/AP` appearance stream and the no-`/AP`
+    /// `/QuadPoints` fallback.
+    #[test]
+    fn reading_colors_keep_highlight_annotations_readable() {
+        let content = "0 g 100 40 10 20 re f";
+        let pdf = format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R /Annots [5 0 R] >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Annot /Subtype /Highlight /Rect [15 35 120 65] /QuadPoints [15 65 120 65 15 35 120 35] /C [1 1 0] {{annot}} >> endobj
+6 0 obj << /Type /XObject /Subtype /Form /BBox [15 35 120 65] /Length 24 >> stream
+0 0 1 rg 15 35 50 30 re f
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        );
+        let render = |annot: &str| {
+            let mut r = PageRenderer::new(
+                Arc::new(pdf.replace("{annot}", annot).into_bytes()),
+                RenderConfig { reading_colors: ReadingColors::WHITE_ON_BLACK, ..Default::default() },
+            );
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(p.error.is_none(), "{annot}: {:?}", p.error);
+            p
+        };
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+
+        // No /AP: the page's black rectangle is remapped to white (document line art), the
+        // yellow fill is not, so Multiply leaves the content under the quad yellow — readable.
+        let p = render("");
+        assert_eq!(px(&p, 5, 5), vec![0, 0, 0, 255], "the page clears to the background");
+        assert_eq!(px(&p, 105, 50), vec![255, 255, 0, 255], "content under the quad shows through in the highlight's colour");
+        assert_eq!(px(&p, 30, 50), vec![0, 0, 0, 255], "the band itself multiplies into the dark background, as in Acrobat");
+        assert_eq!(px(&p, 150, 50), vec![0, 0, 0, 255], "outside the quad");
+
+        // With /AP the appearance's blue is an annotation colour too and stays blue instead of
+        // being remapped towards white by its luminance.
+        let p = render("/AP << /N 6 0 R >>");
+        assert_eq!(px(&p, 30, 50), vec![0, 0, 255, 255], "the appearance keeps its own colour");
+        assert_eq!(px(&p, 90, 50), vec![0, 0, 0, 255], "outside the appearance's own drawing");
+    }
+
     /// A print-preview request (`PRINT_TAG`) renders the document's true colours even though
     /// the document's config carries reading colours: a preview's job is fidelity to the
     /// printout, which is imposed from the uncoloured document. Covers both render paths —
@@ -5505,6 +5627,131 @@ endstream endobj
         let w = out.width as usize;
         assert_eq!(rgb_at(&out.rgba, w, 35, 35), [0, 255, 255], "the transfer function was not applied to a cached image");
         assert_eq!(rgb_at(&out.rgba, w, 100, 35), [255, 0, 0]);
+    }
+
+    /// Render `pdf`'s first page at 72 dpi with no time limit beyond the test's own.
+    fn render_first_page(pdf: Vec<u8>) -> RenderedPage {
+        let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+        let out = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, preview: false });
+        assert!(out.error.is_none(), "{:?}", out.error);
+        out
+    }
+
+    /// A spot-colour image runs its tint transform once per possible sample, not once per pixel
+    /// (vendored hayro-interpret patch 28). Fillable character sheets draw their background art
+    /// as an 8-bit DeviceN image whose tint transform is a PostScript calculator program: run for
+    /// each of a 3304 × 4105 background's pixels, every page took four seconds and 430 MB to
+    /// draw, again after each field was filled. This image (2048 × 2048, a 9,000-operator
+    /// program) took about 40 seconds that way; from a 256-entry table it takes milliseconds.
+    #[test]
+    fn spot_colour_images_run_their_tint_transform_once_per_sample_value() {
+        const SIDE: usize = 2048;
+        // 8,990 operators that change nothing (the calculator allows 10,000 a run), then
+        // tint t → RGB (1 − t, t, 0).
+        let program = format!("{{ {}dup 1 exch sub exch 0 }}", "dup pop ".repeat(4495));
+        // Each row: tint 0 on the left half, tint 1 on the right.
+        let row: Vec<u8> = [vec![0u8; SIDE / 2], vec![255u8; SIDE / 2]].concat();
+        let data = row.repeat(SIDE);
+        let image = format!(
+            "<< /Type /XObject /Subtype /Image /Width {SIDE} /Height {SIDE} /ColorSpace [/Separation /Spot /DeviceRGB 6 0 R] /BitsPerComponent 8 /Length {} >>",
+            data.len()
+        );
+        let function = format!("<< /FunctionType 4 /Domain [0 1] /Range [0 1 0 1 0 1] /Length {} >>", program.len());
+        let pdf =
+            image_cache_pdf("q 130 0 0 70 0 0 cm /A Do Q", "<< /XObject << /A 5 0 R >> >>", &[(&image, &data), (&function, program.as_bytes())]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(render_first_page(pdf));
+        });
+        let out = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("a spot-colour image must not run its tint transform for every pixel");
+        let w = out.width as usize;
+        assert_eq!(rgb_at(&out.rgba, w, 10, 35), [255, 0, 0], "tint 0");
+        assert_eq!(rgb_at(&out.rgba, w, 120, 35), [0, 255, 0], "tint 1");
+    }
+
+    /// Images converted through patch 28's table keep the colour of every sample: the samples of
+    /// a pixel in order, each through its own `/Decode` range, rows that end mid-byte, and an image
+    /// whose data stops part-way through a row (that row is padded with decoded zeros, as before).
+    #[test]
+    fn images_converted_through_a_table_keep_every_samples_colour() {
+        let close = |got: [u8; 3], want: [u8; 3], at: (usize, usize)| {
+            assert!(got.iter().zip(want).all(|(g, w)| g.abs_diff(w) <= 1), "pixel {at:?}: got {got:?}, want {want:?}");
+        };
+        // DeviceN of two inks at 4 bits (256 possible pixels) shown as RGB (a, b, 0), the first
+        // ink's range reversed. 32 × 16 pixels, each drawn 4 pt square.
+        let mut data = Vec::new();
+        for y in 0..16 {
+            for x in 0..32 {
+                let (a, b) = (x % 16, (x / 16 + 2 * y) % 16);
+                data.push(((a << 4) | b) as u8);
+            }
+        }
+        let image = format!(
+            "<< /Type /XObject /Subtype /Image /Width 32 /Height 16 /ColorSpace [/DeviceN [/A /B] /DeviceRGB 6 0 R] /BitsPerComponent 4 /Decode [1 0 0 1] /Length {} >>",
+            data.len()
+        );
+        let pdf = image_cache_pdf(
+            "q 128 0 0 64 0 0 cm /A Do Q",
+            "<< /XObject << /A 5 0 R >> >>",
+            &[(&image, &data), ("<< /FunctionType 4 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Length 5 >>", b"{ 0 }")],
+        );
+        let out = render_first_page(pdf);
+        let w = out.width as usize;
+        for y in 0..16 {
+            for x in 0..32 {
+                let (a, b) = (x % 16, (x / 16 + 2 * y) % 16);
+                // The 64 pt image sits at the bottom of the 70 pt page.
+                close(rgb_at(&out.rgba, w, 4 * x + 2, 6 + 4 * y + 2), [(255 - 17 * a) as u8, (17 * b) as u8, 0], (x, y));
+            }
+        }
+
+        // DeviceGray at 2 bits, reversed: 31 pixels (62 bits, so each row ends mid-byte) by 6.
+        let sample = |x: usize, y: usize| (x + y) % 4;
+        let mut data = Vec::new();
+        for y in 0..6 {
+            let mut row = [0u8; 8];
+            for x in 0..31 {
+                row[x / 4] |= (sample(x, y) as u8) << (6 - 2 * (x % 4));
+            }
+            data.extend_from_slice(&row);
+        }
+        let image = format!(
+            "<< /Type /XObject /Subtype /Image /Width 31 /Height 6 /ColorSpace /DeviceGray /BitsPerComponent 2 /Decode [1 0] /Length {} >>",
+            data.len()
+        );
+        let pdf = image_cache_pdf("q 124 0 0 60 0 0 cm /A Do Q", "<< /XObject << /A 5 0 R >> >>", &[(&image, &data)]);
+        let out = render_first_page(pdf);
+        let w = out.width as usize;
+        for y in 0..6 {
+            for x in 0..31 {
+                // The 60 pt image at the bottom of the page: rows 10 pt high.
+                close(rgb_at(&out.rgba, w, 4 * x + 2, 10 + 10 * y + 5), [(255 - 85 * sample(x, y)) as u8; 3], (x, y));
+            }
+        }
+
+        // DeviceGray at 8 bits through the range [0.2 0.8] (so not drawn from the raw bytes):
+        // 31 × 12 declared, data for 8 rows and the first 12 pixels of the 9th.
+        let sample = |x: usize, y: usize| (x * 7 + y * 3) % 256;
+        let mut data = Vec::new();
+        for y in 0..9 {
+            let row: Vec<u8> = (0..31).map(|x| sample(x, y) as u8).collect();
+            data.extend_from_slice(if y < 8 { &row[..] } else { &row[..12] });
+        }
+        let image = format!(
+            "<< /Type /XObject /Subtype /Image /Width 31 /Height 12 /ColorSpace /DeviceGray /BitsPerComponent 8 /Decode [0.2 0.8] /Length {} >>",
+            data.len()
+        );
+        let pdf = image_cache_pdf("q 124 0 0 60 0 0 cm /A Do Q", "<< /XObject << /A 5 0 R >> >>", &[(&image, &data)]);
+        let out = render_first_page(pdf);
+        let w = out.width as usize;
+        for y in 0..9 {
+            for x in 0..31 {
+                // The rest of the 9th row is decoded zero (black), not sample 0 (0.2 under this range).
+                let gray = if y < 8 || x < 12 { (51.0 + 0.6 * sample(x, y) as f64).round() as u8 } else { 0 };
+                // The rows present keep the declared rows' height: 60 pt / 12.
+                close(rgb_at(&out.rgba, w, 4 * x + 2, 10 + 5 * y + 2), [gray; 3], (x, y));
+            }
+        }
     }
 
     /// A Japanese CID font that isn't embedded (Adobe-Japan1, as `HeiseiMin-W3` with

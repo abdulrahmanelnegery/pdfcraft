@@ -2287,7 +2287,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     let visible_pages: Vec<usize> = if view.continuous { (0..rects.len()).collect() } else { row.clone() };
     let (y_shift, content_h) = if view.continuous {
-        (0.0, rects.last().map(|r| r.bottom() + MARGIN).unwrap_or(0.0))
+        (0.0, rects.iter().map(|r| r.bottom()).reduce(f32::max).map(|bottom| bottom + MARGIN).unwrap_or(0.0))
     } else {
         // Only the current row scrolls into view; the content is its bounding box plus margins.
         match row.iter().filter_map(|&i| rects.get(i)).copied().reduce(Rect::union) {
@@ -2397,6 +2397,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         || app.palette_open
         || app.password_prompt.is_some()
         || app.pending_link.is_some()
+        || app.pending_remote_link.is_some()
         || app.updates.open;
     let mut clicked_link: Option<LinkTarget> = None;
     let mut remote_open: Option<(pdfcraft_engine::DocId, String, pdfcraft_render::RemoteDestination)> = None;
