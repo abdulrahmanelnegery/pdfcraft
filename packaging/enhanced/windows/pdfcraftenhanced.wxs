@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Windows installer for PdfCraft Enhanced (WiX v5). Its own UpgradeCode and registry names, so it
+     installs next to PdfCraft and never upgrades or removes it.
+     wix build pdfcraftenhanced.wxs -arch x64 -d Version=0.7.1 -d BinDir=<dir with PdfCraftEnhanced.exe>
+       -d ModelsDir=<OCR models> -d IconPath=<.ico> -o out.msi -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="PdfCraft Enhanced" Manufacturer="PdfCraft Enhanced" Version="$(Version)"
+           UpgradeCode="7C1F0E4A-5B7D-4E55-9C0B-3B8A2F6D9E11" Scope="perMachine" InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of PdfCraft Enhanced is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="AppIcon" SourceFile="$(IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/abdulrahmanelnegery/pdfcraft" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="PdfCraft Enhanced">
+        <Directory Id="ModelsFolder" Name="models" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <ComponentGroup Id="App" Directory="INSTALLFOLDER">
+      <Component Id="AppExeComponent" Guid="*">
+        <File Id="AppExe" Source="$(BinDir)\PdfCraftEnhanced.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="PdfCraft Enhanced"
+                    WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+        </File>
+      </Component>
+      <!-- Offered under Open with for PDFs; it does not take over the default viewer. -->
+      <Component Id="OpenWithComponent" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\PdfCraftEnhanced.exe" Value="[#AppExe]" Type="string" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.pdf\OpenWithProgids" Name="PdfCraftEnhanced.Document" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\PdfCraftEnhanced.Document" Value="PDF document (PdfCraft Enhanced)" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\PdfCraftEnhanced.Document\shell\open\command" Value="&quot;[#AppExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\PdfCraftEnhanced.exe" Name="FriendlyAppName" Value="PdfCraft Enhanced" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\PdfCraftEnhanced.exe\SupportedTypes" Name=".pdf" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\PdfCraftEnhanced.exe\shell\open\command" Value="&quot;[#AppExe]&quot; &quot;%1&quot;" Type="string" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Models" Directory="ModelsFolder">
+      <Files Include="$(ModelsDir)\**" />
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="PdfCraft Enhanced" Level="1">
+      <ComponentGroupRef Id="App" />
+      <ComponentGroupRef Id="Models" />
+    </Feature>
+  </Package>
+</Wix>

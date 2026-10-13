@@ -14,7 +14,7 @@ on:
     tags: ["v*-enhanced*"]
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,54 +22,89 @@ env:
 
 jobs:
   windows:
+    name: windows-${{ matrix.arch }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+          - arch: x86
+            target: i686-pc-windows-msvc
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
     env:
       RUSTFLAGS: -C target-feature=+crt-static
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --locked -p pdfcraft --features enhanced
-      - name: Package (portable zip)
+        run: cargo build --release --locked -p pdfcraft --features enhanced --target ${{ matrix.target }}
+      - name: Package (MSI installer)
         shell: pwsh
         run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
           $dir = "PdfCraftEnhanced"
           New-Item -ItemType Directory -Force $dir | Out-Null
-          Copy-Item target/release/pdfcraft.exe "$dir/PdfCraftEnhanced.exe"
-          cargo run -q -p xtask -- models "$dir/models"
-          Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE $dir
-          Compress-Archive -Path $dir -DestinationPath "pdfcraftenhanced-windows-x86_64-portable.zip"
-      - uses: actions/upload-artifact@v4
+          Copy-Item "target/${{ matrix.target }}/release/pdfcraft.exe" "$dir/PdfCraftEnhanced.exe"
+          # The OCR models are the same for every architecture; fetch them with the host build of xtask.
+          cargo run -q -p xtask --target x86_64-pc-windows-msvc -- models "$dir/models"
+          dotnet tool install --global wix --version 5.0.2
+          wix build packaging/enhanced/windows/pdfcraftenhanced.wxs -arch ${{ matrix.arch }} `
+            -d Version=$version -d BinDir="$PWD/$dir" -d ModelsDir="$PWD/$dir/models" `
+            -d IconPath="$PWD/assets/app-icon-enhanced/pdfcraftenhanced.ico" `
+            -o "pdfcraftenhanced-$version-windows-${{ matrix.arch }}.msi"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: windows
-          path: pdfcraftenhanced-windows-x86_64-portable.zip
+          name: windows-${{ matrix.arch }}
+          path: pdfcraftenhanced-*-windows-${{ matrix.arch }}.msi
 
   macos:
+    name: macos-${{ matrix.arch }}
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            target: aarch64-apple-darwin
+          - arch: x64
+            target: x86_64-apple-darwin
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --locked -p pdfcraft --features enhanced
+        run: cargo build --release --locked -p pdfcraft --features enhanced --target ${{ matrix.target }}
       - name: Import the signing certificate (skipped without secrets)
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: bash packaging/macos/import-cert.sh
-      - name: Package (.app in a zip)
+      - name: Package (.app in a disk image)
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
         run: |
           APP="PdfCraft Enhanced.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp target/release/pdfcraft "$APP/Contents/MacOS/PdfCraftEnhanced"
+          cp "target/$TARGET/release/pdfcraft" "$APP/Contents/MacOS/PdfCraftEnhanced"
           cargo run -q -p xtask -- models "$APP/Contents/Resources/models"
           VERSION=$(awk '/^\[workspace.package\]/{p=1;next} p&&$1=="version"{gsub(/"/,"",$3);print $3;exit}' Cargo.toml)
           cat > "$APP/Contents/Info.plist" <<PLIST
@@ -124,17 +159,24 @@ jobs:
             echo "::warning::No Developer ID certificate: ad-hoc signed only, Gatekeeper will warn"
             codesign --force --deep -s - "$APP"
           fi
-          ditto -c -k --keepParent "$APP" pdfcraftenhanced-macos-arm64.zip
-      - uses: actions/upload-artifact@v4
+          # Disk image with the app and a shortcut to Applications: drag one onto the other.
+          mkdir dmg-root
+          cp -R "$APP" dmg-root/
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname "PdfCraft Enhanced" -srcfolder dmg-root -ov -format UDZO "pdfcraftenhanced-$VERSION-macos-$ARCH.dmg"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: macos
-          path: pdfcraftenhanced-macos-arm64.zip
+          name: macos-${{ matrix.arch }}
+          path: pdfcraftenhanced-*-macos-${{ matrix.arch }}.dmg
 
   publish:
     needs: [windows, macos]
     runs-on: ubuntu-latest
+    # Only this job writes to the release; the build jobs only read the code.
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: out
           merge-multiple: true
@@ -143,5 +185,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd out
-          sha256sum ./* > SHA256SUMS-windows-macos.txt
+          # One checksum file per package, named after it: <package>.sha256
+          for f in ./*; do
+            name="${f#./}"
+            sha256sum -- "$name" > "$name.sha256"
+          done
           gh release upload "$TAG" ./* --clobber --repo "$GITHUB_REPOSITORY"
