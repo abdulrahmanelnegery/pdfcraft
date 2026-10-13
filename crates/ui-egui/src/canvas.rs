@@ -3953,6 +3953,10 @@ fn notice_bar(ui: &mut egui::Ui, t: &Tokens, icon: &str, icon_color: Color32, te
 /// The floating quick-action bar at the left edge of the document area.
 fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
+    // Phone-sized windows read with the whole width; the tool bar comes back with the editing modes.
+    if app.compact && app.mode == crate::Mode::Read && !app.full_screen {
+        return;
+    }
     let pos = area.left_top() + vec2(14.0, 14.0);
     egui::Area::new(egui::Id::new("quick-bar")).order(egui::Order::Middle).fixed_pos(pos).show(ui.ctx(), |ui| {
         // Full screen: a toggle on top (the same place hidden or shown), then the quick tools and

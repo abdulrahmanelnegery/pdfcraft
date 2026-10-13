@@ -8,6 +8,17 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_render::{PageRenderer, RenderRequest, RequestKind};
 use pdfcraft_ui_egui::{CloseRequest, Dialog, PdfCraftApp};
 
+/// Opening is asynchronous (a worker prepares the file): run frames until it has finished, up to a
+/// generous deadline, so a slow machine does not make the next assertion race it.
+fn settle_opens(h: &mut Harness<'static, PdfCraftApp>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while h.state().opens_in_flight() > 0 && std::time::Instant::now() < deadline {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(2);
+}
+
 /// An `n`-page document with a proper xref table; page `i` shows "Page i+1".
 fn fixture(n: usize) -> Vec<u8> {
     let mut objs: Vec<String> = vec!["<< /Type /Catalog /Pages 2 0 R >>".into()];
@@ -1672,6 +1683,7 @@ fn files_dropped_outside_the_page_grid_still_open_as_documents() {
     let mut h = harness(2, |_| {});
     drop_files(&mut h, vec![Dropped("other.pdf", fixture(1))]);
     h.run_steps(3);
+    settle_opens(&mut h);
     assert_eq!(h.state().views.len(), 2);
     assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2"]);
 }
@@ -1908,6 +1920,7 @@ fn password_prompt_opens_and_security_tab_reports_the_details() {
     h.run_steps(2);
     h.key_press(Key::Enter);
     h.run_steps(4);
+    settle_opens(&mut h);
     assert_eq!(h.state().views.len(), 1);
     h.state_mut().set_option("dialog", "properties").unwrap();
     h.run_steps(2);

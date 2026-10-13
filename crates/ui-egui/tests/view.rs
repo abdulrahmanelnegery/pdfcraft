@@ -1197,3 +1197,20 @@ fn two_up_scroll_end_reaches_an_unpaired_final_page() {
 fn two_up_scroll_end_with_cover_reaches_a_taller_left_page() {
     assert_final_spread_bottom_reachable(&[400, 400, 400, 400, 100], true);
 }
+
+/// A phone-sized window gets the compact chrome: no tab strip buttons for a desktop, no tool-mode tabs.
+#[test]
+fn a_narrow_window_gets_the_compact_chrome() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = Harness::builder().with_size(egui::vec2(412.0, 860.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("pages.pdf", None, PAGES.to_vec()).expect("opens");
+        app
+    });
+    h.run_steps(8);
+    assert!(h.state().compact);
+    assert!(h.query_by_label("Discord").is_none(), "the desktop-only community button is gone");
+    assert!(h.query_by_label("E-Sign").is_none(), "the tool-mode tabs are in the menu, not the bar");
+    assert!(h.query_by_label("Open").is_some(), "Open stays");
+}

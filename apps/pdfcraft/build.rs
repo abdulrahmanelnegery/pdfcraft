@@ -12,18 +12,22 @@ mod windows_manifest;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/pdfcraft.ico");
+    println!("cargo:rerun-if-changed=../../assets/app-icon-enhanced/pdfcraftenhanced.ico");
     println!("cargo:rerun-if-changed=../../assets/app-icon/pdfcraft-document.ico");
     println!("cargo:rerun-if-changed=src/windows_manifest.rs");
     println!("cargo:rerun-if-env-changed=PDFCRAFT_REQUIRE_WINRES");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
+    // The `enhanced` build carries its own icon (the same gold-border one as every other package).
+    let enhanced = std::env::var_os("CARGO_FEATURE_ENHANCED").is_some();
+    let icon = if enhanced { "../../assets/app-icon-enhanced/pdfcraftenhanced.ico" } else { "../../assets/app-icon/pdfcraft.ico" };
     let mut res = winresource::WindowsResource::new();
-    res.set_icon("../../assets/app-icon/pdfcraft.ico")
+    res.set_icon(icon)
         .set_icon_with_id("../../assets/app-icon/pdfcraft-document.ico", "2")
         .set_manifest(windows_manifest::WINDOWS_MANIFEST)
-        .set("ProductName", "PdfCraft")
-        .set("FileDescription", "PdfCraft PDF workbench")
+        .set("ProductName", if enhanced { "PdfCraft Enhanced" } else { "PdfCraft" })
+        .set("FileDescription", if enhanced { "PdfCraft Enhanced PDF reader and editor" } else { "PdfCraft PDF workbench" })
         .set("LegalCopyright", "Copyright (c) the PdfCraft contributors. MIT OR Apache-2.0.")
         .set("OriginalFilename", "pdfcraft.exe")
         .set("InternalName", "pdfcraft");
