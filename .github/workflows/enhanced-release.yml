@@ -40,10 +40,20 @@ jobs:
           cargo run -q -p xtask -- models "$dir/models"
           Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE $dir
           Compress-Archive -Path $dir -DestinationPath "pdfcraftenhanced-windows-x86_64-portable.zip"
+      - name: Package (MSI installer)
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          wix build packaging/enhanced/windows/pdfcraftenhanced.wxs -arch x64 `
+            -d Version=$version -d BinDir="$PWD/PdfCraftEnhanced" -d ModelsDir="$PWD/PdfCraftEnhanced/models" `
+            -d IconPath="$PWD/assets/app-icon-enhanced/pdfcraftenhanced.ico" `
+            -o "pdfcraftenhanced-$version-windows-x64.msi"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows
-          path: pdfcraftenhanced-windows-x86_64-portable.zip
+          path: |
+            pdfcraftenhanced-*-windows-x64.msi
 
   macos:
     runs-on: macos-latest
@@ -125,10 +135,16 @@ jobs:
             codesign --force --deep -s - "$APP"
           fi
           ditto -c -k --keepParent "$APP" pdfcraftenhanced-macos-arm64.zip
+          # Disk image with the app and a shortcut to Applications: drag one onto the other.
+          mkdir dmg-root
+          cp -R "$APP" dmg-root/
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname "PdfCraft Enhanced" -srcfolder dmg-root -ov -format UDZO "pdfcraftenhanced-$VERSION-macos-arm64.dmg"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos
-          path: pdfcraftenhanced-macos-arm64.zip
+          path: |
+            pdfcraftenhanced-*-macos-arm64.dmg
 
   publish:
     needs: [windows, macos]
