@@ -1124,6 +1124,8 @@ fn ctrl_wheel_zooms_both_ways_from_the_default_view() {
     assert!(up > start, "ctrl+wheel up zooms in: {start} -> {up}");
     let down = zoom_after(&mut h, -1.0);
     assert!(down < up, "ctrl+wheel down zooms out: {up} -> {down}");
+}
+
 /// Synthetic unequal-height spreads, generated without font or image assets.
 fn final_spread_at_scroll_end(heights: &[u32], cover: bool) -> (Vec<(usize, egui::Rect)>, egui::Rect) {
     let kids = (0..heights.len()).map(|i| format!("{} 0 R", i + 3)).collect::<Vec<_>>().join(" ");
