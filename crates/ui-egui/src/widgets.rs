@@ -60,6 +60,21 @@ pub fn begin_dialog(ui: &mut egui::Ui) {
     ui.spacing_mut().interact_size.y = FIELD_MIN_HEIGHT;
 }
 
+/// Slider rails are drawn with the widgets' plain fill, which is the popup's own colour in the dark
+/// theme: only the knob showed. Call this first in a popup or panel that holds sliders.
+pub fn visible_slider_rail(ui: &mut egui::Ui) {
+    let rail = slider_rail_color(&Tokens::get(ui.ctx()));
+    let w = &mut ui.visuals_mut().widgets;
+    w.inactive.bg_fill = rail;
+    w.hovered.bg_fill = rail;
+    w.active.bg_fill = rail;
+}
+
+/// A rail colour that stands out from both the card and the page behind it, in either theme.
+fn slider_rail_color(t: &Tokens) -> Color32 {
+    t.card.lerp_to_gamma(t.text_muted, 0.4)
+}
+
 /// A single-line field tall enough to read and to click.
 pub fn line(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
     egui::TextEdit::singleline(text).margin(FIELD_MARGIN).min_size(vec2(0.0, FIELD_MIN_HEIGHT))
@@ -618,6 +633,18 @@ pub fn icon_pill(ui: &mut egui::Ui, icon: &str, label: &str, primary: bool) -> R
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn slider_rails_stand_out_from_the_surfaces_they_sit_on() {
+        let luma = |c: egui::Color32| 0.299 * f32::from(c.r()) + 0.587 * f32::from(c.g()) + 0.114 * f32::from(c.b());
+        for kind in [crate::theme::ThemeKind::Light, crate::theme::ThemeKind::Dark] {
+            let t = Tokens::for_kind(kind);
+            let rail = slider_rail_color(&t);
+            for (name, surface) in [("card", t.card), ("panel", t.panel), ("field", t.field), ("chrome", t.chrome)] {
+                assert!((luma(rail) - luma(surface)).abs() >= 40.0, "{kind:?}: the rail is lost on the {name}");
+            }
+        }
+    }
+
     use super::*;
     use egui::Pos2;
 
