@@ -2340,3 +2340,6 @@ animation effects	Off	Désactivés
 	Local cross-PDF links require the desktop app	Les liens locaux entre PDF nécessitent l'application de bureau
 	Move tag earlier	Déplacer la balise plus tôt
 	Move tag later	Déplacer la balise plus tard
+	Full screen mode ({key}); Esc leaves it	Mode plein écran ({key}); Esc
+	Hide controls	Masquer les commandes
+	Show controls	Afficher les commandes

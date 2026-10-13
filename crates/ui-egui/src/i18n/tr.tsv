@@ -2336,3 +2336,6 @@ animation effects	Off	Kapalı
 	Local cross-PDF links require the desktop app	PDF'ler arası yerel bağlantılar masaüstü uygulamasını gerektirir
 	Move tag earlier	Etiketi daha erken taşı
 	Move tag later	Etiketi daha geç taşı
+	Full screen mode ({key}); Esc leaves it	Tam ekran modu ({key}); Esc
+	Hide controls	Denetimleri gizle
+	Show controls	Denetimleri göster

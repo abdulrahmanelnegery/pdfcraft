@@ -2303,3 +2303,6 @@ animation effects	Off	Изключени
 	Local cross-PDF links require the desktop app	Локалните връзки между PDF файлове изискват настолното приложение
 	Move tag earlier	Преместване на етикета по-рано
 	Move tag later	Преместване на етикета по-късно
+	Full screen mode ({key}); Esc leaves it	Цял екран ({key}); Esc
+	Hide controls	Скриване на контролите
+	Show controls	Показване на контролите

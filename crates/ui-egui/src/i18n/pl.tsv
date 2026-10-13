@@ -2320,3 +2320,6 @@ animation effects	Off	Wyłączone
 	This form's scripts are turned off because one ran too long. Reopen the document to run them again.	Skrypty tego formularza są wyłączone, ponieważ jeden z nich działał zbyt długo. Otwórz dokument ponownie, aby znów je uruchomić.
 	Move tag earlier	Przenieś znacznik wcześniej
 	Move tag later	Przenieś znacznik później
+	Full screen mode ({key}); Esc leaves it	Tryb pełnoekranowy ({key}); Esc
+	Hide controls	Ukryj elementy sterujące
+	Show controls	Pokaż elementy sterujące

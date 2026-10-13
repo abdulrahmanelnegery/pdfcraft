@@ -2361,3 +2361,6 @@ animation effects	Off	معطّلة
 	Local cross-PDF links require the desktop app	تتطلب الروابط المحلية بين ملفات PDF تطبيق سطح المكتب
 	Move tag earlier	نقل العلامة للأعلى
 	Move tag later	نقل العلامة للأسفل
+	Full screen mode ({key}); Esc leaves it	وضع ملء الشاشة ({key}); Esc
+	Hide controls	إخفاء عناصر التحكم
+	Show controls	إظهار عناصر التحكم

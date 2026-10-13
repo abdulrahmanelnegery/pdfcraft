@@ -2339,3 +2339,6 @@ animation effects	Off	Ki
 	Local cross-PDF links require the desktop app	A PDF-ek közötti helyi hivatkozásokhoz az asztali alkalmazás szükséges
 	Move tag earlier	Címke korábbra helyezése
 	Move tag later	Címke későbbre helyezése
+	Full screen mode ({key}); Esc leaves it	Teljes képernyő ({key}); Esc
+	Hide controls	Vezérlők elrejtése
+	Show controls	Vezérlők megjelenítése

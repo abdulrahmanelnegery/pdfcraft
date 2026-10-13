@@ -2584,3 +2584,6 @@ key	End	End
 key	Space	Tarpas
 	Move tag earlier	Perkelti žymą anksčiau
 	Move tag later	Perkelti žymą vėliau
+	Full screen mode ({key}); Esc leaves it	Viso ekrano veiksena ({key}); Esc
+	Hide controls	Slėpti valdiklius
+	Show controls	Rodyti valdiklius

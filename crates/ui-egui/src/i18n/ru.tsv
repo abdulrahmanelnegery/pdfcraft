@@ -2253,3 +2253,6 @@ animation effects	Off	Выкл
 	Local cross-PDF links require the desktop app	Локальные ссылки между PDF работают только в настольном приложении
 	Move tag earlier	Переместить тег раньше
 	Move tag later	Переместить тег позже
+	Full screen mode ({key}); Esc leaves it	Полноэкранный режим ({key}); Esc
+	Hide controls	Скрыть элементы управления
+	Show controls	Показать элементы управления
