@@ -3580,7 +3580,6 @@ dependencies = [
  "winit",
  "winresource",
  "winsafe",
- "winit",
 ]
 
 [[package]]
