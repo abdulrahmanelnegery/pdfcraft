@@ -1,0 +1,147 @@
+name: Enhanced installers
+
+# Builds the Windows and macOS packages of PdfCraft Enhanced and attaches them to a release of this
+# repository. The Linux .deb is built with packaging/enhanced/package.sh. Run it by hand from the
+# Actions tab, giving the release tag, or push a tag named v*-enhanced*.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the packages to, e.g. v0.7.1-enhanced.1"
+        type: string
+        required: true
+  push:
+    tags: ["v*-enhanced*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked -p pdfcraft --features enhanced
+      - name: Package (portable zip)
+        shell: pwsh
+        run: |
+          $dir = "PdfCraftEnhanced"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item target/release/pdfcraft.exe "$dir/PdfCraftEnhanced.exe"
+          cargo run -q -p xtask -- models "$dir/models"
+          Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE $dir
+          Compress-Archive -Path $dir -DestinationPath "pdfcraftenhanced-windows-x86_64-portable.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: pdfcraftenhanced-windows-x86_64-portable.zip
+
+  macos:
+    runs-on: macos-latest
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked -p pdfcraft --features enhanced
+      - name: Import the signing certificate (skipped without secrets)
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: bash packaging/macos/import-cert.sh
+      - name: Package (.app in a zip)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          APP="PdfCraft Enhanced.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp target/release/pdfcraft "$APP/Contents/MacOS/PdfCraftEnhanced"
+          cargo run -q -p xtask -- models "$APP/Contents/Resources/models"
+          VERSION=$(awk '/^\[workspace.package\]/{p=1;next} p&&$1=="version"{gsub(/"/,"",$3);print $3;exit}' Cargo.toml)
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>PdfCraft Enhanced</string>
+            <key>CFBundleDisplayName</key><string>PdfCraft Enhanced</string>
+            <key>CFBundleExecutable</key><string>PdfCraftEnhanced</string>
+            <key>CFBundleIdentifier</key><string>dev.pdfcraftenhanced</string>
+            <key>CFBundleIconFile</key><string>PdfCraftEnhanced</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>CFBundleDocumentTypes</key><array><dict>
+              <key>CFBundleTypeName</key><string>PDF Document</string>
+              <key>CFBundleTypeRole</key><string>Viewer</string>
+              <key>LSHandlerRank</key><string>Alternate</string>
+              <key>LSItemContentTypes</key><array><string>com.adobe.pdf</string></array>
+            </dict></array>
+          </dict></plist>
+          PLIST
+          ICONS=PdfCraftEnhanced.iconset
+          mkdir "$ICONS"
+          SRC=assets/app-icon-enhanced/hicolor/512x512/apps/dev.pdfcraftenhanced.png
+          for s in 16 32 128 256 512; do
+            sips -z $s $s "$SRC" --out "$ICONS/icon_${s}x${s}.png" >/dev/null
+            sips -z $((s*2)) $((s*2)) "$SRC" --out "$ICONS/icon_${s}x${s}@2x.png" >/dev/null
+          done
+          iconutil -c icns "$ICONS" -o "$APP/Contents/Resources/PdfCraftEnhanced.icns"
+          # With a Developer ID certificate in the repository secrets the app is signed with the
+          # hardened runtime and notarized by Apple, so it opens without a Gatekeeper warning.
+          # Without them it gets an ad-hoc signature and the first launch needs Privacy & Security >
+          # Open Anyway (or: xattr -dr com.apple.quarantine "PdfCraft Enhanced.app").
+          if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+            codesign --force --deep --options runtime --timestamp \
+              --entitlements packaging/macos/entitlements.plist \
+              --sign "$MACOS_SIGN_IDENTITY" --keychain "$MACOS_KEYCHAIN" "$APP"
+            codesign --verify --strict --deep --verbose=2 "$APP"
+            ditto -c -k --keepParent "$APP" notarize.zip
+            if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+              xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" --wait --timeout 1h
+              xcrun stapler staple "$APP"
+              xcrun stapler validate "$APP"
+            else
+              echo "::warning::Signed but not notarized: APPLE_ID, APPLE_PASSWORD or APPLE_TEAM_ID is not set"
+            fi
+          else
+            echo "::warning::No Developer ID certificate: ad-hoc signed only, Gatekeeper will warn"
+            codesign --force --deep -s - "$APP"
+          fi
+          ditto -c -k --keepParent "$APP" pdfcraftenhanced-macos-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: pdfcraftenhanced-macos-arm64.zip
+
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out
+          sha256sum ./* > SHA256SUMS-windows-macos.txt
+          gh release upload "$TAG" ./* --clobber --repo "$GITHUB_REPOSITORY"
