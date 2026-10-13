@@ -26,7 +26,66 @@ const TAB_STRIP: f32 = 38.0;
 const TAB_HEIGHT: f32 = 30.0;
 const STRIP_BUTTON: f32 = 28.0;
 
+/// Phone-sized windows: one slim bar with the open document's name, a switcher when several are
+/// open, and Open, instead of the tab strip and its desktop buttons.
+fn compact_title_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    egui::Panel::top("tab_strip").exact_size(44.0).frame(egui::Frame::NONE.fill(t.titlebar).inner_margin(egui::Margin::symmetric(8, 0))).show(
+        ui,
+        |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if icons::button(ui, "house", 36.0, app.active.is_none(), tl!("Home")).clicked() {
+                    app.active = None;
+                    app.combine_tab.focused = false;
+                }
+                let names: Vec<String> =
+                    app.views.iter().map(|v| app.session.get(v.id).map_or_else(|| "?".to_string(), |d| d.display_name().to_string())).collect();
+                let title = app.active.and_then(|i| names.get(i)).cloned().unwrap_or_else(|| "PdfCraft Enhanced".to_string());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if icons::button(ui, "plus", 36.0, false, tl!("Open")).clicked() {
+                        app.open_dialog();
+                    }
+                    let mut close = None;
+                    if names.len() > 1 {
+                        let switcher = icons::button(ui, "files", 36.0, false, tl!("Open documents"));
+                        egui::Popup::menu(&switcher).show(|ui| {
+                            ui.set_min_width(220.0);
+                            for (i, name) in names.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    if ui.add(widgets::radio(app.active == Some(i), crate::bidi::visual(name).as_ref())).clicked() {
+                                        app.active = Some(i);
+                                        ui.close();
+                                    }
+                                    if ui.small_button("✕").clicked() {
+                                        close = Some(i);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    if let Some(i) = close {
+                        app.request_close_tab(i);
+                    }
+                    ui.add_space(4.0);
+                    let width = ui.available_width().max(0.0);
+                    ui.add_sized(
+                        [width, 28.0],
+                        egui::Label::new(egui::RichText::new(crate::bidi::visual(&title).as_ref()).font(theme::medium(14.0)).color(t.text))
+                            .truncate(),
+                    );
+                });
+            });
+        },
+    );
+}
+
 pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+    if app.compact {
+        compact_title_bar(app, ui);
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     // macOS: the strip is the 28 pt title bar, so the traffic lights are centred in it; tabs and
     // buttons shrink to keep a margin above and below.
@@ -412,6 +471,29 @@ fn tab(
 
 pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
+    if app.compact {
+        // Phone-sized: the menu, a search icon and Save; the tool-mode tabs live in the menu.
+        egui::Panel::top("mode_bar")
+            .exact_size(48.0)
+            .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(8, 0)).stroke(Stroke::new(1.0, t.divider)))
+            .show(ui, |ui| {
+                ui.horizontal_centered(|ui| {
+                    main_menu(app, ui);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        ui.add_enabled_ui(app.active.is_some(), |ui| {
+                            if icons::button(ui, "save", 36.0, false, tl!("Save")).clicked() {
+                                app.run_command("file.save");
+                            }
+                        });
+                        if icons::button(ui, "search", 36.0, false, tl!("Find tools and commands")).clicked() {
+                            app.palette_open = true;
+                        }
+                    });
+                });
+            });
+        return;
+    }
     egui::Panel::top("mode_bar")
         .exact_size(48.0)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)).stroke(Stroke::new(1.0, t.divider)))
@@ -644,7 +726,7 @@ fn page_nav_cluster(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, labe
             view.rotate_view(true);
         }
         // A click switches to the next reading theme; the choice list is in Menu ▸ View.
-        if icons::button(ui, "palette", 32.0, reading_theme != crate::canvas::PageTheme::Normal, tl!("Reading theme (click to switch)")).clicked() {
+        if icons::button(ui, "palette", 32.0, reading_theme != crate::canvas::PageTheme::Normal, tl!("Switch page theme")).clicked() {
             page_display = Some("view.reading_theme.next");
         }
         // Not `columns-2` while fitting the page: that is the two-page view's icon.

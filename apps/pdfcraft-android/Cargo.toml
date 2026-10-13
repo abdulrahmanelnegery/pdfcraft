@@ -1,0 +1,70 @@
+[package]
+name = "pdfcraft-android"
+description = "PdfCraft Enhanced on Android (NativeActivity shell, experimental)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# No `[lints] workspace = true`: the workspace forbids `unsafe_code`, and this crate needs it for the
+# `android_main` entry point and for JNI calls into the activity (intents, storage permission).
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+pdfcraft-ui-egui = { workspace = true, features = ["enhanced"] }
+eframe = { workspace = true, features = ["android-native-activity", "wgpu", "default_fonts", "persistence"] }
+egui = { workspace = true }
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.15"
+jni = "0.21"
+# The dialogs' stand-in: its queue of waiting picks is what the file browser answers.
+rfd = { package = "rfd-android", version = "0.1", path = "../../vendor/rfd-android" }
+log = { workspace = true }
+
+[package.metadata.android]
+package = "dev.pdfcraftenhanced"
+apk_name = "PdfCraftEnhanced"
+build_targets = ["aarch64-linux-android"]
+resources = "res"
+
+# Read PDFs from shared storage (the in-app file browser). Android 11+ needs the user to turn on
+# "All files access" for the app; older versions use the two classic permissions.
+[[package.metadata.android.uses_permission]]
+name = "android.permission.READ_EXTERNAL_STORAGE"
+max_sdk_version = 32
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+max_sdk_version = 29
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.MANAGE_EXTERNAL_STORAGE"
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 34
+
+[package.metadata.android.application]
+has_code = true
+label = "PdfCraft Enhanced"
+icon = "@mipmap/ic_launcher"
+# Not the full-screen theme cargo-apk defaults to: the status bar keeps its own strip instead of
+# drawing over the app's tab bar.
+theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+
+[package.metadata.android.application.activity]
+# Our NativeActivity subclass (java/), whose dex build-apk.sh adds to the APK.
+name = "dev.pdfcraftenhanced.MainActivity"
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode"
+exported = true
+
+# Tapping a PDF in a file manager, a download or a mail app offers PdfCraft Enhanced.
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.VIEW"]
+categories = ["android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"]
+data = [{ scheme = "content", mime_type = "application/pdf" }, { scheme = "file", mime_type = "application/pdf" }]
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]
