@@ -79,6 +79,7 @@ fn harness(s: RecoveryStore) -> Harness<'static, PdfCraftApp> {
         app
     });
     h.run_steps(4);
+    settle_opens(&mut h);
     h
 }
 
@@ -92,6 +93,7 @@ fn a_crashed_session_is_offered_and_recovered_unsaved() {
     h.get_by_label("work.pdf");
     h.get_by_label("Recover").click();
     h.run_steps(4);
+    settle_opens(&mut h);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let doc = app.session.get(app.views[0].id).unwrap();
@@ -108,6 +110,7 @@ fn discarding_removes_the_autosaves() {
     let mut h = harness(s.clone());
     h.get_by_label("Discard").click();
     h.run_steps(3);
+    settle_opens(&mut h);
     assert!(h.state().views.is_empty());
     assert_eq!(files_in(&s), 0);
 }
@@ -151,14 +154,17 @@ fn quitting_cleanly_leaves_nothing_behind() {
         }
     });
     h.run_steps(3);
+    settle_opens(&mut h);
     h.state_mut().apply_edit(Edit::RotatePages { pages: vec![0], degrees: 90 });
     h.state_mut().autosave_now();
     assert_eq!(s.list().len(), 1);
     // Quit → "Don't save" → the app closes and the autosave is removed.
     h.state_mut().close_request = Some(pdfcraft_ui_egui::CloseRequest::Quit);
     h.run_steps(2);
+    settle_opens(&mut h);
     h.get_by_label("Don't save").click();
     h.run_steps(4);
+    settle_opens(&mut h);
     assert!(h.state().views.is_empty());
     h.state_mut().shutdown_recovery();
     assert_eq!(files_in(&s), 0);
@@ -197,6 +203,7 @@ fn encrypted_documents_are_autosaved_encrypted_and_recovered_with_the_password()
     field.focus();
     field.type_text("pw");
     h.run_steps(2);
+    settle_opens(&mut h);
     h.key_press(Key::Enter);
     h.run_steps(4);
     settle_opens(&mut h);
@@ -243,6 +250,7 @@ fn a_cancelled_recovery_password_does_not_attach_to_the_next_unlocked_document()
     // Closing B (clean, so no prompt) must not remove A's snapshot either.
     h.state_mut().execute("file.close");
     h.run_steps(3);
+    settle_opens(&mut h);
     assert!(h.state().views.is_empty());
     assert_eq!(s.list().len(), 1, "A's snapshot survives closing B");
 }
@@ -308,6 +316,7 @@ fn missing_corrupt_or_mismatched_metadata_recovers_the_snapshot_without_an_origi
         let mut h = harness(s.clone());
         h.get_by_label("Recover").click();
         h.run_steps(4);
+        settle_opens(&mut h);
         let app = h.state();
         assert_eq!(app.views.len(), 1, "{case}");
         let doc = app.session.get(app.views[0].id).unwrap();
@@ -339,6 +348,7 @@ fn an_encrypted_snapshot_without_metadata_still_requires_its_password() {
     field.focus();
     field.type_text("pw");
     h.run_steps(2);
+    settle_opens(&mut h);
     h.key_press(Key::Enter);
     h.run_steps(4);
     settle_opens(&mut h);
@@ -370,6 +380,7 @@ fn control_click_effects_are_visible_when_the_reply_arrives() {
         app
     });
     h.run_steps(4);
+    settle_opens(&mut h);
     let c = slot.lock().unwrap().take().unwrap();
     let call = |h: &mut Harness<'static, PdfCraftApp>, m: &str, p: serde_json::Value| {
         let rx = c.send(m, p);
