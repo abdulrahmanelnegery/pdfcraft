@@ -1347,7 +1347,7 @@ mod tests {
                 )
             })
         };
-        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
         let cancelled = Arc::new(AtomicBool::new(false));
         let checks = Arc::new(AtomicUsize::new(0));
         let (done_tx, done_rx) = mpsc::channel();
@@ -1364,13 +1364,13 @@ mod tests {
                 done_tx.send(result.unwrap().is_none()).unwrap();
             })
         };
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         while checks.load(Ordering::Relaxed) == 0 {
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
         }
         cancelled.store(true, Ordering::Release);
-        assert!(done_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        assert!(done_rx.recv_timeout(Duration::from_secs(30)).unwrap());
         waiter.join().unwrap();
         release_tx.send(()).unwrap();
         assert!(initializer.join().unwrap().unwrap().is_some());
@@ -2097,7 +2097,7 @@ mod tests {
 
         let started = Instant::now();
         while pool.shared.render_started.load(Ordering::Relaxed) == 0 {
-            assert!(started.elapsed() < Duration::from_secs(2), "request A never started");
+            assert!(started.elapsed() < Duration::from_secs(30), "request A never started");
             std::thread::sleep(Duration::from_millis(1));
         }
 
@@ -2131,7 +2131,7 @@ mod tests {
         pool.set_queue(vec![a, c]);
         let started = Instant::now();
         while lock(&pool.shared.busy).iter().flatten().count() < 2 {
-            assert!(started.elapsed() < Duration::from_secs(2), "both requests never started");
+            assert!(started.elapsed() < Duration::from_secs(30), "both requests never started");
             std::thread::sleep(Duration::from_millis(1));
         }
         *lock(&pool.shared.slow_parse) = None;
@@ -2160,7 +2160,7 @@ mod tests {
         *lock(&pool.shared.busy_publish_gate) = Some(BusyPublishGate { request: a, entered: entered_tx, release: Arc::new(Mutex::new(release_rx)) });
 
         pool.set_queue(vec![a]);
-        entered_rx.recv_timeout(Duration::from_secs(2)).expect("request A passed its first obsolescence check");
+        entered_rx.recv_timeout(Duration::from_secs(30)).expect("request A passed its first obsolescence check");
         assert!(!lock(&pool.shared.busy).iter().flatten().any(|busy| same_request(busy.request, a)));
         pool.set_queue(vec![b]);
         release_tx.send(()).unwrap();

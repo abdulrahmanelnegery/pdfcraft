@@ -1,0 +1,7 @@
+[package]
+name = "arboard-android"
+description = "The slice of the arboard clipboard API PdfCraft uses, for Android where arboard has no backend"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false

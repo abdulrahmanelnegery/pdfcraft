@@ -163,8 +163,21 @@ fn candidates(need: Need) -> Vec<PathBuf> {
     }
 }
 
+/// Android keeps its fonts flat in one folder.
+fn android_fonts(files: &[&str]) -> Vec<PathBuf> {
+    files.iter().map(|f| Path::new("/system/fonts").join(f)).collect()
+}
+
 fn other_candidates() -> Vec<PathBuf> {
-    if cfg!(windows) {
+    if cfg!(target_os = "android") {
+        android_fonts(&[
+            "NotoNaskhArabic-Regular.ttf",
+            "NotoNaskhArabicUI-Regular.ttf",
+            "NotoSansArabic-Regular.ttf",
+            "NotoSansArabicUI-Regular.ttf",
+            "DroidSansArabic.ttf",
+        ])
+    } else if cfg!(windows) {
         ["segoeui.ttf", "tahoma.ttf", "arial.ttf"].iter().map(|f| windows_fonts().join(f)).collect()
     } else if cfg!(target_os = "macos") {
         ["/System/Library/Fonts/SFArabic.ttf", "/System/Library/Fonts/GeezaPro.ttc", "/System/Library/Fonts/Supplemental/Arial.ttf"]
@@ -187,7 +200,15 @@ fn other_candidates() -> Vec<PathBuf> {
 /// Chinese sans faces the operating system ships, the UI language's own region first. Noto CJK
 /// and Source Han are left out on purpose (AGENTS.md §1.1).
 fn han_candidates(traditional: bool) -> Vec<PathBuf> {
-    if cfg!(windows) {
+    if cfg!(target_os = "android") {
+        android_fonts(&[
+            "NotoSansCJK-Regular.ttc",
+            "NotoSansSC-Regular.otf",
+            "NotoSansHans-Regular.otf",
+            "DroidSansFallback.ttf",
+            "DroidSansFallbackFull.ttf",
+        ])
+    } else if cfg!(windows) {
         // Microsoft YaHei / JhengHei, then the older SimSun / MingLiU collections.
         let files: &[&str] =
             if traditional { &["msjh.ttc", "msyh.ttc", "mingliu.ttc", "simsun.ttc"] } else { &["msyh.ttc", "msjh.ttc", "simsun.ttc", "mingliu.ttc"] };

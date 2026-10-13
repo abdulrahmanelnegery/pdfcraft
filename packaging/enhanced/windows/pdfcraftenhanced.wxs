@@ -6,7 +6,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="PdfCraft Enhanced" Manufacturer="PdfCraft Enhanced" Version="$(Version)"
            UpgradeCode="7C1F0E4A-5B7D-4E55-9C0B-3B8A2F6D9E11" Scope="perMachine" InstallerVersion="500">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of PdfCraft Enhanced is already installed." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of PdfCraft Enhanced is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="AppIcon" SourceFile="$(IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />

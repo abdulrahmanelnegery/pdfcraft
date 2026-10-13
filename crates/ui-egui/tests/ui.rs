@@ -4,6 +4,17 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_ui_egui::PdfCraftApp;
 
+/// Opening is asynchronous (a worker prepares the file): run frames until it has finished, up to a
+/// generous deadline, so a slow machine does not make the next assertion race it.
+fn settle_opens(h: &mut Harness<'static, PdfCraftApp>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while h.state().opens_in_flight() > 0 && std::time::Instant::now() < deadline {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(2);
+}
+
 /// A tiny PDF with two pages, two bookmarks and one sticky note.
 const FIXTURE: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >> endobj
@@ -396,6 +407,7 @@ fn narrow_tab_strips_accept_vertical_wheel_scrolling() {
             app
         });
         h.run_steps(4);
+        settle_opens(&mut h);
         let last = h.get_by_label("narrow-11.pdf").rect();
         assert!(last.center().x > 28.0 && last.right() < width - 100.0, "active tab: {last:?}");
         h.state_mut().active = Some(0);
@@ -682,6 +694,7 @@ fn dropping_a_pdf_on_the_window_opens_it() {
     let file: egui::DroppedFileHandle = std::sync::Arc::new(Dropped { path: "dropped.pdf".into(), bytes: FIXTURE.to_vec() });
     h.input_mut().dropped_files.push(file);
     h.run_steps(3);
+    settle_opens(&mut h);
     assert_eq!(h.state().views.len(), 1, "the dropped PDF opens in a tab");
     h.get_by_label_contains("dropped.pdf");
 }
