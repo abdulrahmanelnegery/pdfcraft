@@ -114,5 +114,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd out
-          sha256sum * > SHA256SUMS-windows-macos.txt
-          gh release upload "$TAG" * --clobber --repo "$GITHUB_REPOSITORY"
+          sha256sum ./* > SHA256SUMS-windows-macos.txt
+          gh release upload "$TAG" ./* --clobber --repo "$GITHUB_REPOSITORY"
