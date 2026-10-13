@@ -1140,26 +1140,68 @@ fn drawn_shape(tool: CommentTool, points: &[[f64; 2]]) -> Option<Shape> {
     }
 }
 
-/// Eraser: rub out drawings along `path` (user space); one undo step for all of them.
+/// Markup the eraser takes away whole when the stroke touches it, with how it is touched: text-like
+/// marks by their area, outlined shapes by their outline (so rubbing inside a big rectangle does not
+/// remove it).
+fn eraser_touches(subtype: &str, rect: [f64; 4], path: &[[f64; 2]], radius: f64) -> bool {
+    let near = |p: &[f64; 2], r: f64| p[0] >= rect[0] - r && p[0] <= rect[2] + r && p[1] >= rect[1] - r && p[1] <= rect[3] + r;
+    match subtype {
+        "Highlight" | "Underline" | "StrikeOut" | "Squiggly" | "FreeText" | "Text" | "Caret" | "FileAttachment" | "Stamp" => {
+            path.iter().any(|p| near(p, radius))
+        }
+        "Square" | "Circle" | "Polygon" | "PolyLine" | "Line" => {
+            // Touching the bounding box but not its middle: the outline (a line's box is thin anyway).
+            let thin = (rect[2] - rect[0]).min(rect[3] - rect[1]) <= radius * 4.0;
+            path.iter().any(|p| {
+                near(p, radius)
+                    && (thin
+                        || !(p[0] > rect[0] + radius * 2.0
+                            && p[0] < rect[2] - radius * 2.0
+                            && p[1] > rect[1] + radius * 2.0
+                            && p[1] < rect[3] - radius * 2.0))
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Eraser: rub out drawings along `path` (user space), and take away any other markup the stroke
+/// touches (highlights, underlines, text boxes, shapes, notes); one undo step for all of them.
 fn erase(cx: &PageCx<'_>, path: &[[f64; 2]]) -> Option<Edit> {
     let zoom = (cx.xf.rect.width() / cx.xf.pw.max(1.0)) as f64;
     let radius = (6.0 / zoom).max(1.0);
     let b = path.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |r, p| [r[0].min(p[0]), r[1].min(p[1]), r[2].max(p[0]), r[3].max(p[1])]);
-    let mut hits: Vec<usize> = cx
+    let in_box = |r: [f32; 4]| {
+        (r[0] as f64) <= b[2] + radius && (r[2] as f64) >= b[0] - radius && (r[1] as f64) <= b[3] + radius && (r[3] as f64) >= b[1] - radius
+    };
+    // (index, whether it is a drawing to rub out, not a mark to remove whole)
+    let mut hits: Vec<(usize, bool)> = cx
         .comments()
-        .filter(|a| a.subtype == "Ink" && !a.locked)
-        .filter(|a| {
-            let r = a.rect;
-            (r[0] as f64) <= b[2] + radius && (r[2] as f64) >= b[0] - radius && (r[1] as f64) <= b[3] + radius && (r[3] as f64) >= b[1] - radius
+        .filter(|a| !a.locked && in_box(a.rect))
+        .filter_map(|a| {
+            if a.subtype == "Ink" {
+                Some((a.index, true))
+            } else {
+                let rect = [a.rect[0] as f64, a.rect[1] as f64, a.rect[2] as f64, a.rect[3] as f64];
+                eraser_touches(&a.subtype, rect, path, radius).then_some((a.index, false))
+            }
         })
-        .map(|a| a.index)
         .collect();
     if hits.is_empty() {
         return None;
     }
-    // Later indices first: deleting an emptied drawing shifts the ones after it.
-    hits.sort_unstable_by(|a, b| b.cmp(a));
-    let edits = hits.into_iter().map(|index| Edit::EraseInk { page: cx.page, index, path: path.to_vec(), radius }).collect();
+    // Later indices first: deleting an annotation shifts the ones after it.
+    hits.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    let edits =
+        hits.into_iter()
+            .map(|(index, ink)| {
+                if ink {
+                    Edit::EraseInk { page: cx.page, index, path: path.to_vec(), radius }
+                } else {
+                    Edit::DeleteAnnotation { page: cx.page, index }
+                }
+            })
+            .collect();
     Some(Edit::Batch { label: "Erase".into(), edits })
 }
 
@@ -1705,6 +1747,23 @@ pub fn status_badge(state: &str) -> Option<(&'static str, &'static str, Color32)
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_eraser_takes_away_marks_it_touches() {
+        let hl = [100.0, 100.0, 200.0, 112.0];
+        // A stroke over a highlight, and one well away from it.
+        assert!(eraser_touches("Highlight", hl, &[[150.0, 106.0]], 6.0));
+        assert!(!eraser_touches("Highlight", hl, &[[150.0, 300.0]], 6.0));
+        // Close to its edge still counts, as the pointer is a brush, not a point.
+        assert!(eraser_touches("Underline", hl, &[[203.0, 106.0]], 6.0));
+        // A big rectangle goes only when its outline is touched, not when the pointer is inside it.
+        let sq = [100.0, 100.0, 400.0, 400.0];
+        assert!(!eraser_touches("Square", sq, &[[250.0, 250.0]], 6.0));
+        assert!(eraser_touches("Square", sq, &[[102.0, 250.0]], 6.0));
+        // Links, widgets and everything else stay.
+        assert!(!eraser_touches("Link", hl, &[[150.0, 106.0]], 6.0));
+        assert!(!eraser_touches("Widget", hl, &[[150.0, 106.0]], 6.0));
+    }
+
     use super::*;
     use pdfcraft_render::TextGlyph;
 
