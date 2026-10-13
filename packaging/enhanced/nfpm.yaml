@@ -1,0 +1,33 @@
+# .deb for the side-by-side PdfCraft Enhanced build. Run by package.sh (it substitutes ${STAGE}).
+name: pdfcraftenhanced
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+release: 1
+section: graphics
+priority: optional
+maintainer: PdfCraft Enhanced <noreply@localhost>
+description: |-
+  PdfCraft with a page night mode and per-file reading position.
+  Installs next to the regular pdfcraft package (own app id, icon and settings).
+overrides:
+  deb:
+    depends:
+      - libc6 (>= 2.35)
+      - libgcc-s1
+      - libxkbcommon0
+      - libvulkan1 | libegl1
+    recommends:
+      - cups-client
+      - libwayland-client0
+      - libx11-6
+      - mesa-vulkan-drivers
+      - xdg-desktop-portal
+contents:
+  - src: ${STAGE}/usr/
+    dst: /usr/
+    type: tree
+scripts:
+  postinstall: packaging/linux/postinst.sh
+  postremove: packaging/linux/postinst.sh

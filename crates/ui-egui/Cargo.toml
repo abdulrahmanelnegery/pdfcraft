@@ -9,6 +9,10 @@ rust-version = "1.95"
 [lints]
 workspace = true
 
+[features]
+# The fork build drops the ArtCraft branding (docs/brand/ may be used only unmodified, as part of PdfCraft).
+enhanced = []
+
 [dependencies]
 craft-ui = { workspace = true }
 pdfcraft-fonts = { workspace = true }

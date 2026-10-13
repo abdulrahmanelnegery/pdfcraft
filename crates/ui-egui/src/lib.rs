@@ -464,6 +464,10 @@ pub struct RecentFile {
     pub size: usize,
 }
 
+/// The settings key of the mode documents open in. The fork build keeps its own, so a saved
+/// choice from before it opened in Read mode doesn't pin it to All tools.
+const DEFAULT_MODE_KEY: &str = if cfg!(feature = "enhanced") { "default_mode_enhanced" } else { "default_mode" };
+
 pub struct PdfCraftApp {
     pub docking: docking::Workspace,
     pub(crate) pending_panel_reveals: Vec<docking::Panel>,
@@ -510,6 +514,15 @@ pub struct PdfCraftApp {
     /// The reading-colours preference (Preferences ▸ Reading colours): applied to every open
     /// document, and documents open with it (Acrobat's Replace Document Colors).
     pub reading_colors: pdfcraft_render::ReadingColors,
+    /// How page rasters are tinted for reading (View ▸ Reading theme).
+    pub page_theme: canvas::PageTheme,
+    /// Full screen: the page controls (navigation rail and quick tools) are tucked away.
+    pub fs_controls_hidden: bool,
+    /// The active view's page display last frame, to spot the reader changing it.
+    display_seen: Option<(DocId, canvas::PageLayout, bool)>,
+    /// The page each file was last read at, by absolute path (most recent last), so reopening a
+    /// file returns to it.
+    pub reading_places: Vec<last_session::ReadingPlace>,
     /// The Linux portal is enabled only by the native host, and starts on the first System choice.
     #[cfg(target_os = "linux")]
     desktop_theme: Option<pdfcraft_platform::desktop_theme::DesktopTheme>,
@@ -844,7 +857,8 @@ impl PdfCraftApp {
             closed_tabs: Vec::new(),
             active: None,
             mode: Mode::AllTools,
-            default_mode: Mode::AllTools,
+            // The fork build opens documents in Read mode.
+            default_mode: if cfg!(feature = "enhanced") { Mode::Read } else { Mode::AllTools },
             view_defaults: Default::default(),
             units: Default::default(),
             date_format_draft: None,
@@ -863,6 +877,10 @@ impl PdfCraftApp {
             theme: ThemeKind::Light,
             theme_preference: ThemePreference::Light,
             reading_colors: Default::default(),
+            page_theme: Default::default(),
+            fs_controls_hidden: false,
+            display_seen: None,
+            reading_places: Vec::new(),
             #[cfg(target_os = "linux")]
             desktop_theme: None,
             #[cfg(target_os = "linux")]
@@ -1029,9 +1047,10 @@ impl PdfCraftApp {
     /// Open a document the way it asks to be opened: navigation panel, layout, magnification,
     /// page (Document Properties ▸ Initial View).
     fn apply_initial_view(&mut self, index: usize, v: &pdfcraft_engine::InitialView) {
-        use pdfcraft_engine::{InitialLayout as L, Magnification as M, Navigation as N};
+        use pdfcraft_engine::{Magnification as M, Navigation as N};
         let pages = self.session.get(self.views[index].id).map_or(0, |d| d.info.pages.len());
-        if self.active == Some(index) {
+        // The fork build never opens a navigation panel on its own, whatever the document asks.
+        if self.active == Some(index) && !cfg!(feature = "enhanced") {
             match v.navigation {
                 N::PageOnly => {}
                 N::Bookmarks => self.right = Some(RightPanel::Bookmarks),
@@ -1041,18 +1060,18 @@ impl PdfCraftApp {
             }
         }
         let view = &mut self.views[index];
-        match v.layout {
-            // The view opened in Default page display already.
-            L::Default => {}
-            L::SinglePage => (view.layout, view.continuous) = (canvas::PageLayout::Single, false),
-            L::SinglePageContinuous => (view.layout, view.continuous) = (canvas::PageLayout::Single, true),
-            L::TwoUp => (view.layout, view.continuous) = (canvas::PageLayout::TwoUp, false),
-            L::TwoUpContinuous => (view.layout, view.continuous) = (canvas::PageLayout::TwoUp, true),
-            L::TwoUpCoverPage => {
-                (view.layout, view.continuous, view.cover) = (canvas::PageLayout::TwoUp, false, true);
-            }
-            L::TwoUpContinuousCoverPage => {
-                (view.layout, view.continuous, view.cover) = (canvas::PageLayout::TwoUp, true, true);
+        // The fork build ignores the document's own page display: the reader's last choice wins.
+        if !cfg!(feature = "enhanced") {
+            use pdfcraft_engine::InitialLayout as L;
+            match v.layout {
+                // The view opened in Default page display already.
+                L::Default => {}
+                L::SinglePage => (view.layout, view.continuous) = (canvas::PageLayout::Single, false),
+                L::SinglePageContinuous => (view.layout, view.continuous) = (canvas::PageLayout::Single, true),
+                L::TwoUp => (view.layout, view.continuous) = (canvas::PageLayout::TwoUp, false),
+                L::TwoUpContinuous => (view.layout, view.continuous) = (canvas::PageLayout::TwoUp, true),
+                L::TwoUpCoverPage => (view.layout, view.continuous, view.cover) = (canvas::PageLayout::TwoUp, false, true),
+                L::TwoUpContinuousCoverPage => (view.layout, view.continuous, view.cover) = (canvas::PageLayout::TwoUp, true, true),
             }
         }
         match v.magnification {
@@ -1264,11 +1283,21 @@ impl PdfCraftApp {
             };
         }
         let initial = doc.initial_view();
+        let resume = doc.path.as_deref().and_then(|p| self.saved_position(p));
         self.views.push(DocView::new(id, &doc.info, self.view_defaults));
         if activate {
             self.active = Some(self.views.len() - 1);
         }
         self.apply_initial_view(self.views.len() - 1, &initial);
+        if let Some(place) = resume
+            && let Some(view) = self.views.last_mut()
+        {
+            view.apply_zoom_token(&place.zoom);
+            if place.page < pages && (place.page > 0 || place.frac > 0.0) {
+                view.go_to_page(place.page);
+                view.resume = Some((place.page, place.frac, 12));
+            }
+        }
         if activate
             && self.left_open
             && self.left == LeftPanel::Tool("organize")
@@ -1693,7 +1722,9 @@ impl PdfCraftApp {
         if index >= self.views.len() {
             return;
         }
-        let id = self.views.remove(index).id;
+        let view = self.views.remove(index);
+        let id = view.id;
+        self.remember_position(id, &view);
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(path) = self.session.get(id).and_then(|d| d.path.clone()) {
             if self.closed_tabs.len() == 10 {
@@ -1815,6 +1846,29 @@ impl PdfCraftApp {
             if self.session.set_reading_colors(self.views[i].id, colors) {
                 self.views[i].invalidate_content();
             }
+        }
+    }
+
+    /// A page display the reader picks on a document (single or two-up, continuous or not) becomes
+    /// the default for every document and for the next session.
+    fn remember_display_choice(&mut self) {
+        let Some(view) = self.active.and_then(|i| self.views.get(i)) else { return };
+        let now = (view.id, view.layout, view.continuous);
+        if let Some((id, layout, continuous)) = self.display_seen
+            && id == now.0
+            && (layout, continuous) != (now.1, now.2)
+        {
+            (self.view_defaults.layout, self.view_defaults.continuous) = (now.1, now.2);
+        }
+        self.display_seen = Some(now);
+    }
+
+    /// Set the reading theme for every open document; pages re-render.
+    pub fn set_page_theme(&mut self, theme: canvas::PageTheme) {
+        self.page_theme = theme;
+        canvas::set_page_theme(theme);
+        for view in &mut self.views {
+            view.restyle();
         }
     }
 
@@ -1999,7 +2053,7 @@ impl PdfCraftApp {
     /// Serialize the user's persistent state (recent files, theme). Local only.
     pub fn persist(&self) -> String {
         let trusted: Vec<String> = self.session.trusted_certificates().iter().map(pdfcraft_engine::sign::x509::to_pem).collect();
-        serde_json::json!({
+        let mut state = serde_json::json!({
             "docking": self.docking,
             "docking_left_open": self.left_open,
             "docking_right": self.right,
@@ -2012,7 +2066,6 @@ impl PdfCraftApp {
             "theme": self.theme_preference,
             "scroll_speed": self.scroll_speed,
             "animation_effects": self.animation_effects,
-            "default_mode": self.default_mode,
             "default_layout": canvas::display_token(self.view_defaults.layout, self.view_defaults.continuous),
             "default_zoom": self.view_defaults.zoom_name(),
             "highlight_fields": self.view_defaults.highlight_fields,
@@ -2057,8 +2110,12 @@ impl PdfCraftApp {
             "combine_zoom": self.combine_zoom,
             "comments_panel_closed": self.comments_panel_closed,
             "right_panel_closed": self.right_panel_closed,
-        })
-        .to_string()
+        });
+        // Outside the macro: the literal above is at serde_json's recursion limit.
+        state[DEFAULT_MODE_KEY] = serde_json::json!(self.default_mode);
+        state["page_theme"] = self.page_theme.token().into();
+        state["reading_places"] = serde_json::json!(self.positions_to_save());
+        state.to_string()
     }
 
     /// Restore state written by `persist`. Unknown or malformed data is ignored.
@@ -2071,7 +2128,9 @@ impl PdfCraftApp {
             self.docking = workspace;
             self.left_open =
                 v.get("docking_left_open").and_then(serde_json::Value::as_bool).unwrap_or(self.docking.layout.contains(&docking::Panel::Tools));
-            self.right = v.get("docking_right").and_then(|value| serde_json::from_value(value.clone()).ok()).flatten();
+            // The fork build starts with no side panel open, whatever was open last time.
+            self.right =
+                v.get("docking_right").and_then(|value| serde_json::from_value(value.clone()).ok()).flatten().filter(|_| !cfg!(feature = "enhanced"));
         }
         self.combine_columns = combine_ui::Columns::from_json(&v["combine_columns"]);
         if let Some(view) = v["combine_view"].as_str().and_then(combine_ui::CombineView::parse) {
@@ -2103,7 +2162,7 @@ impl PdfCraftApp {
         if let Ok(effects) = serde_json::from_value::<motion::AnimationEffects>(v["animation_effects"].clone()) {
             self.animation_effects = effects;
         }
-        if let Ok(mode) = serde_json::from_value::<Mode>(v["default_mode"].clone()) {
+        if let Ok(mode) = serde_json::from_value::<Mode>(v[DEFAULT_MODE_KEY].clone()) {
             self.default_mode = mode;
         }
         if let Some((layout, continuous)) = v["default_layout"].as_str().and_then(canvas::parse_display_token) {
@@ -2138,6 +2197,10 @@ impl PdfCraftApp {
         if let Ok(colors) = serde_json::from_value::<pdfcraft_render::ReadingColors>(v["reading_colors"].clone()) {
             self.reading_colors = colors;
         }
+        if let Some(theme) = v["page_theme"].as_str().and_then(canvas::PageTheme::from_token) {
+            self.set_page_theme(theme);
+        }
+        self.reading_places = last_session::places_from_json(&v["reading_places"]);
         // Settings are untrusted: a size out of range follows the system instead.
         self.ui_scale = v["ui_scale"].as_f64().and_then(ui_scale::valid);
         // Settings are untrusted: an unusable pattern keeps the default.
@@ -2653,6 +2716,7 @@ impl eframe::App for PdfCraftApp {
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.remember_display_choice();
         self.ctx = Some(ctx.clone());
         self.dialog_epoch();
         // Notices raised outside `ui` (opened files, OS events, the control channel) translate too.
@@ -2825,7 +2889,8 @@ impl eframe::App for PdfCraftApp {
             self.window_title = title;
         }
         if self.full_screen && self.active.is_some() {
-            // Full screen: the page, nothing else (Esc or ⌘L to leave).
+            // Full screen: the page and its controls, which fold away to one small button
+            // (Esc or ⌘L to leave).
             let t = theme::Tokens::get(&ctx);
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(if t.dark() { t.pasteboard } else { egui::Color32::from_gray(32) })).show(
                 ui,

@@ -44,14 +44,28 @@ mod updates;
 mod windows_manifest;
 
 /// Freedesktop app id: the `.desktop` file name and the hicolor icon name.
+#[cfg(not(feature = "enhanced"))]
 const APP_ID: &str = "ai.storyteller.pdfcraft";
+/// The side-by-side "enhanced" build has its own id, icon and settings folder, so it installs
+/// next to the regular app without sharing its launcher, window class or settings.
+#[cfg(feature = "enhanced")]
+const APP_ID: &str = "dev.pdfcraftenhanced";
+
+/// Folder name of the settings under the user's data directory.
+#[cfg(not(feature = "enhanced"))]
+const SETTINGS_NAME: &str = "PdfCraft";
+#[cfg(feature = "enhanced")]
+const SETTINGS_NAME: &str = "PdfCraftEnhanced";
 
 /// The app icon (assets/app-icon/README.md). macOS gets the version on Apple's icon grid, with a
 /// transparent margin; Windows and Linux get the full-bleed tile.
 #[cfg(target_os = "macos")]
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/pdfcraft-1024.png");
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(feature = "enhanced")))]
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.pdfcraft.png");
+
+#[cfg(all(not(target_os = "macos"), feature = "enhanced"))]
+const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon-enhanced/hicolor/256x256/apps/dev.pdfcraftenhanced.png");
 
 /// The app was called PrintCraft before; settings saved then are under this key.
 const LEGACY_STORAGE_KEY: &str = "printcraft";
@@ -63,7 +77,7 @@ fn settings_dir() -> Option<std::path::PathBuf> {
     if let Some(dir) = pdfcraft_ui_egui::portable::data_dir() {
         return Some(dir.to_path_buf());
     }
-    eframe::storage_dir("PdfCraft")
+    eframe::storage_dir(SETTINGS_NAME)
 }
 
 /// Move the settings and crash-recovery folders of the app's former name, PrintCraft, to the new
@@ -1295,7 +1309,10 @@ mod tests {
     /// so it has to be the class the window carries: the app id, on Wayland and X11 alike.
     #[test]
     fn the_desktop_entry_names_the_window_class() {
+        #[cfg(not(feature = "enhanced"))]
         let entry = include_str!("../../../packaging/linux/ai.storyteller.pdfcraft.desktop");
+        #[cfg(feature = "enhanced")]
+        let entry = include_str!("../../../packaging/enhanced/dev.pdfcraftenhanced.desktop");
         let class = entry.lines().find_map(|line| line.strip_prefix("StartupWMClass="));
         assert_eq!(class, Some(super::APP_ID));
     }

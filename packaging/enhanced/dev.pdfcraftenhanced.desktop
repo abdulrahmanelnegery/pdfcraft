@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=PdfCraft Enhanced
+GenericName=PDF Editor
+Comment=PdfCraft with night mode and per-file reading position
+Exec=pdfcraftenhanced %U
+TryExec=pdfcraftenhanced
+Icon=dev.pdfcraftenhanced
+Terminal=false
+StartupNotify=true
+StartupWMClass=dev.pdfcraftenhanced
+Categories=Office;Viewer;
+Keywords=pdf;viewer;editor;annotate;sign;forms;merge;split;
+MimeType=application/pdf;

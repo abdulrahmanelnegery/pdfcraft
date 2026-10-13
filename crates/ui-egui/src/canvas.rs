@@ -312,6 +312,11 @@ pub struct DocView {
     pub forward: Vec<usize>,
     /// Pending navigation: page and fraction down the page to align with the viewport top.
     pub goto: Option<(usize, f32)>,
+    /// Where a reopened file left off (page, fraction down it, frames left to hold it): applied
+    /// again for a few frames, because the first layouts happen before fit-width settles the zoom.
+    pub resume: Option<(usize, f32, u8)>,
+    /// The page at the viewport's top and how far down it the top edge is, for remembering the place.
+    pub read_anchor: (usize, f32),
     /// Pending position within that page from a destination ([`Self::go_to_dest`]): the point
     /// (fractions of the displayed page; `None` leaves that axis to `goto`) to put `rel` points
     /// from the viewport's top-left corner.
@@ -595,6 +600,8 @@ impl DocView {
             back: Vec::new(),
             forward: Vec::new(),
             goto: None,
+            resume: None,
+            read_anchor: (0, 0.0),
             goto_point: None,
             key_scroll: 0.0,
             single_edges: None,
@@ -818,6 +825,24 @@ impl DocView {
         }
     }
 
+    /// Re-render the page images only (the reading theme changed). Unlike [`invalidate_content`]
+    /// this keeps the text layers, the selection and the search results, so switching is light.
+    pub fn restyle(&mut self) {
+        for p in self.pages.values_mut() {
+            p.tag = STALE_TAG;
+        }
+        self.stale_thumbs.extend(self.thumbs.keys().copied());
+        for slot in self.print_pages.values_mut() {
+            slot.0 = STALE_TAG;
+        }
+        self.grid_pages.clear();
+        self.tiles.clear();
+        self.stale_tiles.clear();
+        self.forms.unbaked.clear();
+        self.waiting_since.clear();
+        self.last_queue.clear();
+    }
+
     /// Only `page` changed (a comment was added, edited or removed): re-render that page and
     /// re-read its text, keep everything else. Out-of-date tiles stay on screen until replacements arrive.
     pub fn page_changed(&mut self, page: usize) {
@@ -1002,6 +1027,30 @@ impl DocView {
 
     pub fn thumb(&self, page: usize) -> Option<&TextureHandle> {
         self.thumbs.get(&page).map(|t| &t.tex)
+    }
+
+    /// The zoom as saved with a file: `fit-width`, `fit-page`, `fit-height` or a percentage.
+    pub fn zoom_token(&self) -> String {
+        match self.fit {
+            Fit::Width => "fit-width".into(),
+            Fit::Page => "fit-page".into(),
+            Fit::Height => "fit-height".into(),
+            Fit::None => format!("{}%", (self.zoom * 100.0).round()),
+        }
+    }
+
+    /// Apply a [`zoom_token`](Self::zoom_token); anything unreadable leaves the zoom alone.
+    pub fn apply_zoom_token(&mut self, token: &str) {
+        match token {
+            "fit-width" => self.fit = Fit::Width,
+            "fit-page" => self.fit = Fit::Page,
+            "fit-height" => self.fit = Fit::Height,
+            other => {
+                if let Some(percent) = other.strip_suffix('%').and_then(|p| p.parse::<f32>().ok()) {
+                    self.set_zoom(percent / 100.0);
+                }
+            }
+        }
     }
 
     pub fn go_to_page(&mut self, page: usize) {
@@ -1598,7 +1647,8 @@ impl DocView {
             return 0;
         }
         // The length was checked above, so the renderer's buffer becomes the texture data as is.
-        let img = texture_image([r.width as usize, r.height as usize], r.rgba);
+        let mut img = texture_image([r.width as usize, r.height as usize], r.rgba);
+        apply_page_theme(&mut img, page_theme());
         if let Some(t) = r.request.tile {
             let key = (page, r.request.tag, t.x, t.y);
             let tex = ctx.load_texture(format!("tile-{:?}-{page}-{}-{}", self.id, t.x, t.y), img, TextureOptions::LINEAR);
@@ -2268,7 +2318,11 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let r = rects[page.min(rects.len() - 1)];
         let point = pos2(r.left() + fx * r.width(), r.top() - y_shift + fy * r.height());
         scroll = scroll.scroll_offset(vec2((point.x - rel.x).max(0.0), (point.y - rel.y).max(0.0)));
-    } else if let Some((page, frac)) = view.goto.take() {
+    } else if let Some((page, frac)) = view.goto.take().or_else(|| {
+        let (page, frac, frames) = view.resume.take()?;
+        view.resume = frames.checked_sub(1).filter(|f| *f > 0).map(|f| (page, frac, f));
+        Some((page, frac))
+    }) {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
         scroll = scroll.vertical_scroll_offset((r.top() - y_shift - GAP + frac * r.height()).max(0.0));
@@ -3162,6 +3216,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // the workers cannot cancel mid-operator. Fresh tiles go out once the pan settles;
     // pages with nothing on screen yet still queue.
     let scroll_offset = out.state.offset;
+    if view.continuous && view.resume.is_none() && !rects.is_empty() {
+        let top = scroll_offset.y + y_shift + GAP;
+        let page = rects.iter().rposition(|r| r.top() <= top).unwrap_or(0);
+        view.read_anchor = (page, ((top - rects[page].top()) / rects[page].height().max(1.0)).clamp(0.0, 1.0));
+    } else if !view.continuous {
+        view.read_anchor = (view.current, 0.0);
+    }
     let now_settle = ui.input(|i| i.time);
     if (scroll_offset - view.last_scroll).length() > 2.0 {
         view.pan_hold_until = now_settle + 0.25;
@@ -3245,7 +3306,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         tag: TEXT_TAG,
         preview: false,
     }));
-    view.frame_queue = queue;
+    // A file reopened at its place lays out at the top first: skip that frame's requests so the
+    // workers start on the page the reader left, not on page 1.
+    view.frame_queue = if view.resume.is_some_and(|(_, _, left)| left >= 11) { Vec::new() } else { queue };
     view.frame_visible = visible_now.iter().copied().collect();
 
     if let Some((pos, text)) = hover_text {
@@ -3891,6 +3954,16 @@ fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let pos = area.left_top() + vec2(14.0, 14.0);
     egui::Area::new(egui::Id::new("quick-bar")).order(egui::Order::Middle).fixed_pos(pos).show(ui.ctx(), |ui| {
+        // Full screen: a toggle on top (the same place hidden or shown), then the quick tools and
+        // the page controls, each in its own island.
+        ui.spacing_mut().item_spacing.y = 8.0;
+        let full_screen = app.full_screen;
+        if full_screen {
+            crate::chrome::fs_toggle_island(app, ui);
+            if app.fs_controls_hidden {
+                return;
+            }
+        }
         egui::Frame::NONE
             .fill(t.card)
             .stroke(Stroke::new(1.0, t.border))
@@ -4067,6 +4140,9 @@ fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                     }
                 });
             });
+        if full_screen {
+            crate::chrome::page_nav_island(app, ui);
+        }
     });
 }
 
@@ -4531,6 +4607,111 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
     }
 }
 
+/// How page rasters are tinted for reading (View ▸ Reading theme). Display only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PageTheme {
+    #[default]
+    Normal,
+    /// Lightness flipped, hues kept: black page, white text.
+    Night,
+    /// Night, softened to a dark grey page and off-white text.
+    SoftNight,
+    /// A warm paper tint.
+    Sepia,
+}
+
+impl PageTheme {
+    pub const ALL: [Self; 4] = [Self::Normal, Self::Night, Self::SoftNight, Self::Sepia];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "Normal page",
+            Self::Night => "Night",
+            Self::SoftNight => "Soft night",
+            Self::Sepia => "Sepia",
+        }
+    }
+
+    /// The token saved in settings.
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Night => "night",
+            Self::SoftNight => "soft-night",
+            Self::Sepia => "sepia",
+        }
+    }
+
+    pub fn from_token(token: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.token() == token)
+    }
+
+    /// The registry command that selects this theme.
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::Normal => "view.reading_theme.normal",
+            Self::Night => "view.reading_theme.night",
+            Self::SoftNight => "view.reading_theme.soft-night",
+            Self::Sepia => "view.reading_theme.sepia",
+        }
+    }
+
+    /// The next theme in [`Self::ALL`], wrapping (the rail button cycles).
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+}
+
+static PAGE_THEME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub(crate) fn page_theme() -> PageTheme {
+    let i = PAGE_THEME.load(std::sync::atomic::Ordering::Relaxed) as usize;
+    PageTheme::ALL.get(i).copied().unwrap_or_default()
+}
+
+pub(crate) fn set_page_theme(theme: PageTheme) {
+    let i = PageTheme::ALL.iter().position(|t| *t == theme).unwrap_or(0);
+    PAGE_THEME.store(i as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Tint a rendered page for `theme`. Translucent pixels are left alone (pages render opaque).
+pub(crate) fn apply_page_theme(img: &mut egui::ColorImage, theme: PageTheme) {
+    match theme {
+        PageTheme::Normal => {}
+        PageTheme::Night => night_invert(img, 0, 255),
+        PageTheme::SoftNight => night_invert(img, 30, 210),
+        PageTheme::Sepia => {
+            for px in &mut img.pixels {
+                let [r, g, b, a] = px.to_array();
+                if a == 255 {
+                    // Multiply by a warm paper colour: white becomes the paper, black stays black.
+                    *px = Color32::from_rgb(r, (g as u16 * 236 / 255) as u8, (b as u16 * 204 / 255) as u8);
+                }
+            }
+        }
+    }
+}
+
+/// Flip lightness and keep hue: each channel becomes `255 - (max + min) + c` (invert, then rotate
+/// the hue half a turn), so white turns black, black white and colours stay recognisable. The
+/// result is then squeezed into `low..=high`.
+pub(crate) fn night_invert(img: &mut egui::ColorImage, low: u16, high: u16) {
+    for px in &mut img.pixels {
+        let [r, g, b, a] = px.to_array();
+        if a != 255 {
+            continue;
+        }
+        let span = r.max(g).max(b) as i16 + r.min(g).min(b) as i16;
+        // In 0..=255: min <= c <= max, so `255 - span + c` is >= 255 - max and <= 255 - min.
+        let f = |c: u8| {
+            let flipped = (255 - span + c as i16).clamp(0, 255) as u16;
+            (low + flipped * (high - low) / 255) as u8
+        };
+        *px = Color32::from_rgb(f(r), f(g), f(b));
+    }
+}
+
 /// A rendered raster as texture data. Its words are premultiplied RGBA bytes, exactly
 /// `Color32`s, so the renderer's buffer becomes the image without a copy on the UI thread.
 pub(crate) fn texture_image(size: [usize; 2], pixels: pdfcraft_render::Pixels) -> egui::ColorImage {
@@ -4569,6 +4750,27 @@ mod tests {
     fn hover_popup_skips_fill_and_sign_marks() {
         assert_eq!(annotation_hover_text(&annotation(false)).as_deref(), Some("FreeText\nHello"));
         assert_eq!(annotation_hover_text(&annotation(true)), None);
+    }
+
+    #[test]
+    fn page_themes_tint_pages_and_keep_hue() {
+        let px = vec![Color32::WHITE, Color32::BLACK, Color32::from_rgb(200, 50, 50), Color32::from_rgba_premultiplied(10, 10, 10, 10)];
+        let themed = |theme| {
+            let mut img = egui::ColorImage::new([4, 1], px.clone());
+            apply_page_theme(&mut img, theme);
+            img.pixels
+        };
+        assert_eq!(themed(PageTheme::Normal), px);
+        let night = themed(PageTheme::Night);
+        assert_eq!((night[0], night[1], night[2]), (Color32::BLACK, Color32::WHITE, Color32::from_rgb(205, 55, 55)));
+        assert_eq!(night[3], px[3]);
+        let soft = themed(PageTheme::SoftNight);
+        assert_eq!((soft[0], soft[1]), (Color32::from_gray(30), Color32::from_gray(210)));
+        let sepia = themed(PageTheme::Sepia);
+        assert_eq!((sepia[0], sepia[1]), (Color32::from_rgb(255, 236, 204), Color32::BLACK));
+        assert_eq!(PageTheme::Sepia.next(), PageTheme::Normal);
+        assert_eq!(PageTheme::from_token("soft-night"), Some(PageTheme::SoftNight));
+        assert_eq!(PageTheme::from_token("x"), None);
     }
 
     #[test]
