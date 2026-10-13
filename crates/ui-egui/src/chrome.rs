@@ -41,7 +41,7 @@ fn compact_title_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 }
                 let names: Vec<String> =
                     app.views.iter().map(|v| app.session.get(v.id).map_or_else(|| "?".to_string(), |d| d.display_name().to_string())).collect();
-                let title = app.active.and_then(|i| names.get(i)).cloned().unwrap_or_else(|| tl!("PdfCraft Enhanced").to_string());
+                let title = app.active.and_then(|i| names.get(i)).cloned().unwrap_or_else(|| "PdfCraft Enhanced".to_string());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     if icons::button(ui, "plus", 36.0, false, tl!("Open")).clicked() {
