@@ -48,8 +48,7 @@ pub fn incoming_document(app: &AndroidApp) -> Option<Incoming> {
             return Ok(None);
         }
         let resolver = env.call_method(activity, "getContentResolver", "()Landroid/content/ContentResolver;", &[])?.l()?;
-        let stream =
-            env.call_method(&resolver, "openInputStream", "(Landroid/net/Uri;)Ljava/io/InputStream;", &[JValue::Object(&uri)])?.l()?;
+        let stream = env.call_method(&resolver, "openInputStream", "(Landroid/net/Uri;)Ljava/io/InputStream;", &[JValue::Object(&uri)])?.l()?;
         if stream.is_null() {
             return Ok(None);
         }
@@ -122,9 +121,7 @@ pub fn has_storage_access(app: &AndroidApp) -> bool {
             return env.call_static_method("android/os/Environment", "isExternalStorageManager", "()Z", &[])?.z();
         }
         let permission = env.new_string("android.permission.READ_EXTERNAL_STORAGE")?;
-        let granted = env
-            .call_method(activity, "checkSelfPermission", "(Ljava/lang/String;)I", &[JValue::Object(&permission)])?
-            .i()?;
+        let granted = env.call_method(activity, "checkSelfPermission", "(Ljava/lang/String;)I", &[JValue::Object(&permission)])?.i()?;
         Ok(granted == 0)
     })
     .unwrap_or(false)
@@ -138,15 +135,11 @@ pub fn request_storage_access(app: &AndroidApp) {
             let package = env.call_method(activity, "getPackageName", "()Ljava/lang/String;", &[])?.l()?;
             let package = format!("package:{}", string_of(env, package)?);
             let package = env.new_string(package)?;
-            let uri = env
-                .call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&package)])?
-                .l()?;
+            let uri =
+                env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&package)])?.l()?;
             let action = env.new_string("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION")?;
-            let intent = env.new_object(
-                "android/content/Intent",
-                "(Ljava/lang/String;Landroid/net/Uri;)V",
-                &[JValue::Object(&action), JValue::Object(&uri)],
-            )?;
+            let intent =
+                env.new_object("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V", &[JValue::Object(&action), JValue::Object(&uri)])?;
             env.call_method(activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)])?;
         } else {
             let read = env.new_string("android.permission.READ_EXTERNAL_STORAGE")?;

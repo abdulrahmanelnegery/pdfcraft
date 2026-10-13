@@ -133,7 +133,10 @@ impl Browser {
                         }
                         Kind::Save => {
                             ui.add_sized([ui.available_width() - 120.0, 48.0], egui::TextEdit::singleline(&mut self.file_name));
-                            if ui.add_enabled(!self.file_name.trim().is_empty(), egui::Button::new("Save").min_size(egui::vec2(100.0, 48.0))).clicked() {
+                            if ui
+                                .add_enabled(!self.file_name.trim().is_empty(), egui::Button::new("Save").min_size(egui::vec2(100.0, 48.0)))
+                                .clicked()
+                            {
                                 done = Some(Some(vec![self.dir.join(self.file_name.trim())]));
                             }
                         }
