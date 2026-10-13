@@ -1191,7 +1191,7 @@ fn erase(cx: &PageCx<'_>, path: &[[f64; 2]]) -> Option<Edit> {
         return None;
     }
     // Later indices first: deleting an annotation shifts the ones after it.
-    hits.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    hits.sort_unstable_by_key(|h| std::cmp::Reverse(h.0));
     let edits =
         hits.into_iter()
             .map(|(index, ink)| {
