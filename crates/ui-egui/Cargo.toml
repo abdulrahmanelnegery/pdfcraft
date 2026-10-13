@@ -39,6 +39,8 @@ unicode-bidi = "0.3"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 eframe = { workspace = true, features = ["accesskit"] }
 rfd = { workspace = true }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 # Create ▸ Clipboard (images; already in the tree through egui-winit).
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 
